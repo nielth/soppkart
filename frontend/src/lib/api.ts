@@ -174,32 +174,6 @@ export const TRAILS_URL =
   '&LAYERS=Fotrute,Skiloype,Sykkelrute,AnnenRute&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}' +
   '&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true'
 
-/** Strava's global heatmap at a spot (opens strava.com, where you are logged in). */
-export function stravaHeatmapUrl(lat: number, lon: number, zoom: number): string {
-  return `https://www.strava.com/maps/global-heatmap?sport=All&style=standard#${zoom.toFixed(2)}/${lat.toFixed(5)}/${lon.toFixed(5)}`
-}
-
-/**
- * Opens the Strava app. Strava has no documented link to a position or to its map
- * tab, and its heatmap page isn't a universal link (iOS would open it in Safari).
- */
-export const STRAVA_APP_URL = 'strava://'
-
-/** True on phones and tablets, where app links like strava:// work. */
-export const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-
-/**
- * Open Strava: on phones only the app (it can't be sent to a position or to its map tab,
- * so it opens on its start screen); elsewhere the heatmap page at the spot.
- */
-export function openStrava(lat: number, lon: number, zoom: number): void {
-  if (IS_MOBILE) {
-    window.location.href = STRAVA_APP_URL
-    return
-  }
-  window.open(stravaHeatmapUrl(lat, lon, zoom), '_blank', 'noopener')
-}
-
 /** Strava heatmap types (Strava's own names) with their labels in the map. */
 export const STRAVA_ACTIVITIES = [
   { key: 'run', label: 'Til fots (gå, løp, fjelltur)' },

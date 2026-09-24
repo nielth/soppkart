@@ -17,8 +17,6 @@
     fetchStatus,
     findingsUrl,
     IMAGERY_URL,
-    IS_MOBILE,
-    openStrava,
     STRAVA_ACTIVITIES,
     stravaTilesUrl,
     TRAILS_URL,
@@ -505,12 +503,6 @@
     }
   }
 
-  function openStravaHere() {
-    if (!map) return
-    const { lat, lng } = map.getCenter()
-    openStrava(lat, lng, Math.max(map.getZoom(), 12))
-  }
-
   function loadWeights(): Record<string, number> {
     try {
       return JSON.parse(localStorage.getItem(WEIGHTS_STORAGE_KEY) ?? '{}') as Record<string, number>
@@ -709,7 +701,6 @@
           </select>
         {/if}
       {/if}
-      <button class="action" onclick={openStravaHere}>{IS_MOBILE ? 'Åpne Strava-appen' : 'Åpne Strava heatmap her ↗'}</button>
     </section>
 
     {#if groups.length}
