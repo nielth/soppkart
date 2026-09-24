@@ -17,9 +17,7 @@
     fetchStatus,
     findingsUrl,
     IMAGERY_URL,
-    IS_MOBILE,
-    STRAVA_APP_MAP_URL,
-    stravaHeatmapUrl,
+    openStrava,
     TRAILS_URL,
     myFindingsUrl,
     startRetrain,
@@ -484,10 +482,10 @@
     }
   }
 
-  function openStrava() {
+  function openStravaHere() {
     if (!map) return
     const { lat, lng } = map.getCenter()
-    window.open(stravaHeatmapUrl(lat, lng, Math.max(map.getZoom(), 12)), '_blank', 'noopener')
+    openStrava(lat, lng, Math.max(map.getZoom(), 12))
   }
 
   function loadWeights(): Record<string, number> {
@@ -668,10 +666,7 @@
       <label class="check">
         <input type="checkbox" bind:checked={showTrails} /> Vis turstier (Kartverket)
       </label>
-      <button class="action" onclick={openStrava}>Åpne Strava heatmap her ↗</button>
-      {#if IS_MOBILE}
-        <a class="action" href={STRAVA_APP_MAP_URL}>Åpne kartet i Strava-appen</a>
-      {/if}
+      <button class="action" onclick={openStravaHere}>Åpne Strava her ↗</button>
     </section>
 
     {#if groups.length}
@@ -932,11 +927,6 @@
     padding: 8px 10px;
     font-size: 13px;
     cursor: pointer;
-  }
-
-  a.action {
-    text-align: center;
-    text-decoration: none;
   }
 
   .action.primary {
