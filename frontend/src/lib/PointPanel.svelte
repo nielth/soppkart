@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { stravaHeatmapUrl, type PointInfo, type Status } from './api'
+  import { IS_MOBILE, STRAVA_APP_MAP_URL, stravaHeatmapUrl, type PointInfo, type Status } from './api'
 
   interface Props {
     point: PointInfo | null
@@ -92,6 +92,9 @@
         <a class="maps" href={stravaHeatmapUrl(point.lat, point.lon, 15)} target="_blank" rel="noopener">
           Strava ↗
         </a>
+        {#if IS_MOBILE}
+          <a class="maps" href={STRAVA_APP_MAP_URL}>Strava-app</a>
+        {/if}
         <button
           class="register"
           disabled={registered}

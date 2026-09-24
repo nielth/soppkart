@@ -17,6 +17,8 @@
     fetchStatus,
     findingsUrl,
     IMAGERY_URL,
+    IS_MOBILE,
+    STRAVA_APP_MAP_URL,
     stravaHeatmapUrl,
     TRAILS_URL,
     myFindingsUrl,
@@ -667,6 +669,9 @@
         <input type="checkbox" bind:checked={showTrails} /> Vis turstier (Kartverket)
       </label>
       <button class="action" onclick={openStrava}>Åpne Strava heatmap her ↗</button>
+      {#if IS_MOBILE}
+        <a class="action" href={STRAVA_APP_MAP_URL}>Åpne kartet i Strava-appen</a>
+      {/if}
     </section>
 
     {#if groups.length}
@@ -927,6 +932,11 @@
     padding: 8px 10px;
     font-size: 13px;
     cursor: pointer;
+  }
+
+  a.action {
+    text-align: center;
+    text-decoration: none;
   }
 
   .action.primary {

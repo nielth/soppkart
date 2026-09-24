@@ -176,3 +176,13 @@ export const TRAILS_URL =
 export function stravaHeatmapUrl(lat: number, lon: number, zoom: number): string {
   return `https://www.strava.com/maps/global-heatmap?sport=All&style=standard#${zoom.toFixed(2)}/${lat.toFixed(5)}/${lon.toFixed(5)}`
 }
+
+/**
+ * Opens the Strava app on its map (phones only). Strava has no documented link to a
+ * position in the app, and its heatmap page isn't a universal link, so this is the
+ * closest the app can get.
+ */
+export const STRAVA_APP_MAP_URL = 'strava://maps'
+
+/** True on phones and tablets, where app links like strava:// work. */
+export const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
