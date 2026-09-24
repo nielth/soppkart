@@ -1,8 +1,8 @@
 # Soppkart 🍄
 
 A map of Norway that shows your position and colours the terrain by how
-promising it is for a chosen mushroom species: **kantarell** (chanterelle) or **spiss fleinsopp**
-(*Psilocybe semilanceata*). Choose the species in the map panel. The frontend is Svelte with MapLibre, and
+promising it is for a chosen mushroom species: **kantarell**, **steinsopp**, **svart trompetsopp**,
+**spiss fleinsopp** or **morkel**. Choose the species in the map panel. The frontend is Svelte with MapLibre, and
 the backend is Python with FastAPI and XGBoost. Both run in Docker Compose behind
 your own reverse proxy.
 
@@ -53,7 +53,9 @@ whatever the resolution.
 
 ## Using the map
 
-- **Species:** pick kantarell or spiss fleinsopp at the top of the panel.
+- **Species:** pick one at the top of the panel.
+- **Tapping:** a tap opens the score for that spot (or a finding's details); when something is
+  open, the next tap only closes it.
 - **Vis topp X %:** the slider decides how much of the species' habitat is coloured (default 5 %).
   At 10 % only the best tenth is shown, and the colour scale stretches over that part.
 - **Vekting:** one slider per factor group (skog, jordbruk og beite, terreng, jordtype, vann,
@@ -61,8 +63,9 @@ whatever the resolution.
   doubles its say. The map and the tapped point update within a second.
 - **Tap the map** for the score, how much each factor group pulls it up or down at that spot, and
   all feature values of that square.
-- **Turstier / Strava:** "Vis turstier" draws Kartverket's Turrutebasen (footpaths, ski, cycle and
-  other routes) over the map. "Vis Strava heatmap" draws Strava's global heatmap (on foot, all,
+- **Turstier / Strava:** "Vis turstier" (on by default) draws Kartverket's Turrutebasen (footpaths,
+  ski, cycle and other routes, including DNT's UT.no routes) over the map; tapping on or near a
+  route when zoomed in shows its name, maintainer, marking and grading in the score panel. "Vis Strava heatmap" draws Strava's global heatmap (on foot, all,
   cycling, winter or water) when `STRAVA_SESSION` is set to your `_strava4_session` cookie from
   strava.com: the backend fetches the tiles with your login, renews Strava's 24 h heatmap access
   itself and caches tiles in Redis for as long as Strava allows (7 days). Only use this on a
@@ -73,7 +76,7 @@ whatever the resolution.
   key is restricted by referrer, set `ESRI_REFERER` to that address.
   Tiles are cached in the stack's Redis (memory only, 1 GB) for as long as Esri allows (24 h),
   so the same photos aren't requested again.
-- **Registrerte funn:** tick "Vis registrerte funn" to see the GBIF/Artsdatabanken findings the model
+- **Registrerte funn:** "Vis registrerte funn" (on by default) shows the GBIF/Artsdatabanken findings the model
   learned from; tap a point for its details (year, precision, type) and a link to GBIF.
 - **Your own finds:** "📍 Registrer funn her" saves your GPS position (only positions accurate to
   50 m are used for training), or tap a spot and choose "Jeg fant … her". Your finds are green
@@ -106,8 +109,9 @@ To add a species, add an entry to `SPECIES` in `backend/src/soppkart/config.py` 
 taxon keys, then run `soppkart fetch` and `soppkart train --species <key>`.
 
 **Habitat rules:** each species can have simple rules in `SPECIES` (config.py) that decide where
-it can grow at all: kantarell needs at least 25 % forest; spiss fleinsopp at most 50 % forest and
-at most 50 % crop fields + mowed grass.
+it can grow at all: kantarell, steinsopp and svart trompetsopp need at least 25 % forest; spiss
+fleinsopp at most 50 % forest and at most 50 % crop fields + mowed grass; morkel (the genus
+*Morchella*, not the poisonous stenmorkel) has no rule.
 Squares outside the habitat get the lowest score and are left out of training, so the model
 learns what makes a good spot *within* the habitat, and the score ranks squares against the
 species' habitat in all of Norway.

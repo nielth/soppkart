@@ -187,3 +187,19 @@ export const STRAVA_ACTIVITIES = [
 export function stravaTilesUrl(activity: string): string {
   return `${location.origin}/api/strava/${activity}/{z}/{x}/{y}.png`
 }
+
+export interface TrailRoute {
+  /** Fotrute, Skiløype, Sykkelrute or Annen rute. */
+  type: string
+  fields: { label: string; value: string }[]
+}
+
+/** Kartverket routes (incl. DNT/UT.no routes) within toleranceM metres of a spot. */
+export function fetchTrails(lat: number, lon: number, toleranceM: number): Promise<TrailRoute[]> {
+  const params = new URLSearchParams({
+    lat: lat.toFixed(6),
+    lon: lon.toFixed(6),
+    tolerance_m: toleranceM.toFixed(0),
+  })
+  return getJson<TrailRoute[]>(`/api/trails?${params}`)
+}

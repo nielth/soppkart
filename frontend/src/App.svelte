@@ -13,6 +13,7 @@
     fetchMyFindings,
     fetchPoint,
     fetchSpecies,
+    fetchTrails,
     formatFoundAt,
     fetchStatus,
     findingsUrl,
@@ -26,10 +27,32 @@
     weightsParam,
     type MyFinding,
     type PointInfo,
+    type TrailRoute,
     type Species,
     type Status,
   } from './lib/api'
   import Legend from './lib/Legend.svelte'
+  import { Badge } from '$lib/components/ui/badge'
+  import { Button } from '$lib/components/ui/button'
+  import * as Card from '$lib/components/ui/card'
+  import * as Collapsible from '$lib/components/ui/collapsible'
+  import { Label } from '$lib/components/ui/label'
+  import * as Select from '$lib/components/ui/select'
+  import { Separator } from '$lib/components/ui/separator'
+  import { Slider } from '$lib/components/ui/slider'
+  import { Switch } from '$lib/components/ui/switch'
+  import * as ToggleGroup from '$lib/components/ui/toggle-group'
+  import {
+    ChevronDown,
+    Crosshair,
+    Layers,
+    MapPin,
+    Menu,
+    RotateCcw,
+    SlidersHorizontal,
+    Sparkles,
+    X,
+  } from '@lucide/svelte'
   import PointPanel from './lib/PointPanel.svelte'
 
   let mapEl: HTMLDivElement
@@ -47,8 +70,8 @@
   let statusError = $state<string | null>(null)
   let opacity = $state(0.65)
   let showHeatmap = $state(true)
-  let showFindings = $state(false)
-  let showTrails = $state(false)
+  let showFindings = $state(true)
+  let showTrails = $state(true)
   let showStravaHeat = $state(false)
   let stravaActivity = $state('run')
   let stravaAvailable = $state(false)
@@ -56,6 +79,9 @@
   let pointLoading = $state(false)
   let pointError = $state<string | null>(null)
   let selected: { lat: number; lon: number } | null = null
+  let routes = $state<TrailRoute[]>([])
+  // The finding popup that is open, if any (a map tap closes it).
+  let openPopup: maplibregl.Popup | null = null
   // Set once the map's own layers exist, so effects that style them re-run then.
   let mapLoaded = $state(false)
   // Share of the habitat to colour: the best topPct %.
@@ -229,22 +255,6 @@
           'circle-radius': 7,
         },
       })
-      map!.on('click', 'my-findings', (e) => {
-        const feature = e.features?.[0]
-        if (feature?.geometry.type === 'Point') showMyFinding(feature)
-      })
-      map!.on('click', 'findings-points', (e) => {
-        const feature = e.features?.[0]
-        if (feature?.geometry.type === 'Point') showGbifFinding(feature)
-      })
-      map!.on('click', 'findings-clusters', async (e) => {
-        const feature = e.features?.[0]
-        if (!feature || feature.geometry.type !== 'Point') return
-        const source = map!.getSource<maplibregl.GeoJSONSource>('findings')
-        const zoom = await source!.getClusterExpansionZoom(feature.properties.cluster_id as number)
-        const [lon, lat] = feature.geometry.coordinates
-        map!.easeTo({ center: [lon, lat], zoom })
-      })
       for (const id of ['my-findings', 'findings-points', 'findings-clusters']) {
         map!.on('mouseenter', id, () => (map!.getCanvas().style.cursor = 'pointer'))
         map!.on('mouseleave', id, () => (map!.getCanvas().style.cursor = ''))
@@ -258,12 +268,7 @@
       gps = { lat: e.coords.latitude, lon: e.coords.longitude, accuracy: e.coords.accuracy }
     })
 
-    map.on('click', (e) => {
-      // Clicks on findings open their popup (or zoom into a cluster) instead.
-      const layers = ['my-findings', 'findings-points', 'findings-clusters'].filter((id) => map!.getLayer(id))
-      if (map!.queryRenderedFeatures(e.point, { layers }).length) return
-      selectPoint(e.lngLat.lat, e.lngLat.lng)
-    })
+    map.on('click', (e) => onMapClick(e))
 
     fetchConfig()
       .then((c) => {
@@ -445,8 +450,15 @@
   function showFindingPopup(lon: number, lat: number, radiusM: number | null, content: HTMLElement) {
     const source = map!.getSource<maplibregl.GeoJSONSource>('finding-radius')
     source?.setData(radiusM ? circle(lon, lat, radiusM) : EMPTY_COLLECTION)
-    const popup = new maplibregl.Popup({ closeButton: true }).setLngLat([lon, lat]).setDOMContent(content).addTo(map!)
-    popup.on('close', () => source?.setData(EMPTY_COLLECTION))
+    const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false })
+      .setLngLat([lon, lat])
+      .setDOMContent(content)
+      .addTo(map!)
+    openPopup = popup
+    popup.on('close', () => {
+      source?.setData(EMPTY_COLLECTION)
+      if (openPopup === popup) openPopup = null
+    })
     return popup
   }
 
@@ -594,12 +606,60 @@
     }
   }
 
+  /**
+   * One handler for all map taps: if something is open, the tap only closes it.
+   * Otherwise it opens the finding under the tap, zooms into a cluster, or shows
+   * the score for the spot.
+   */
+  async function onMapClick(e: maplibregl.MapMouseEvent) {
+    if (!map) return
+    if (openPopup || point || pointError || pointLoading) {
+      closeAll()
+      return
+    }
+    const layers = ['my-findings', 'findings-points', 'findings-clusters'].filter((id) => map!.getLayer(id))
+    const feature = map.queryRenderedFeatures(e.point, { layers })[0]
+    if (feature?.geometry.type === 'Point') {
+      const [lon, lat] = feature.geometry.coordinates
+      if (feature.layer.id === 'my-findings') showMyFinding(feature)
+      else if (feature.layer.id === 'findings-points') showGbifFinding(feature)
+      else {
+        const source = map.getSource<maplibregl.GeoJSONSource>('findings')
+        const zoom = await source!.getClusterExpansionZoom(feature.properties.cluster_id as number)
+        map.easeTo({ center: [lon, lat], zoom })
+      }
+      return
+    }
+    selectPoint(e.lngLat.lat, e.lngLat.lng)
+  }
+
+  function closeAll() {
+    openPopup?.remove()
+    openPopup = null
+    closePanel()
+  }
+
   function selectPoint(lat: number, lon: number) {
     if (!map) return
     marker?.remove()
     marker = new maplibregl.Marker({ color: '#7a3e00' }).setLngLat([lon, lat]).addTo(map)
     selected = { lat, lon }
     loadPoint(lat, lon)
+    loadRoutes(lat, lon)
+  }
+
+  /** Routes within ~12 screen pixels of the tapped spot, when trails are shown and zoomed in. */
+  async function loadRoutes(lat: number, lon: number) {
+    routes = []
+    // Only at hiking zoom, where single routes can be told apart.
+    if (!showTrails || !map || map.getZoom() < 11) return
+    const metresPerPixel = (156_543 * Math.cos((lat * Math.PI) / 180)) / 2 ** map.getZoom()
+    try {
+      const found = await fetchTrails(lat, lon, Math.max(10, 12 * metresPerPixel))
+      if (selected?.lat === lat && selected?.lon === lon) routes = found
+    } catch {
+      // Route info is a bonus; the score panel works without it.
+    }
   }
 
   async function loadPoint(lat: number, lon: number) {
@@ -618,195 +678,281 @@
   function closePanel() {
     point = null
     pointError = null
+    routes = []
     selected = null
     marker?.remove()
     marker = undefined
   }
 </script>
 
-<div class="layout">
-  <aside class="sidebar" class:open={sidebarOpen}>
-    <header>
-      <div class="title">🍄 Soppkart</div>
-      <button class="close" onclick={() => (sidebarOpen = false)} aria-label="Lukk meny">×</button>
+<div class="flex h-full">
+  <aside
+    class="fixed inset-y-0 left-0 z-40 flex w-[min(340px,88vw)] -translate-x-full flex-col gap-3 overflow-y-auto border-r bg-background p-3 *:shrink-0 pt-[max(12px,env(safe-area-inset-top))] shadow-xl transition-transform duration-200 md:static md:w-[340px] md:translate-x-0 md:shadow-none"
+    class:translate-x-0={sidebarOpen}
+  >
+    <header class="flex items-center justify-between px-1">
+      <div class="flex items-center gap-2">
+        <span class="text-2xl">🍄</span>
+        <div>
+          <div class="text-lg leading-tight font-semibold">Soppkart</div>
+          <div class="text-xs text-muted-foreground">Finn de beste soppstedene</div>
+        </div>
+      </div>
+      <Button variant="ghost" size="icon" class="md:hidden" onclick={() => (sidebarOpen = false)} aria-label="Lukk meny">
+        <X />
+      </Button>
     </header>
 
     {#if statusError}
-      <div class="warn">Backend utilgjengelig: {statusError}</div>
+      <div class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        Backend utilgjengelig: {statusError}
+      </div>
     {:else if status && !status.ready}
-      <div class="warn">{status.message}</div>
+      <div class="rounded-md border bg-accent px-3 py-2 text-xs">{status.message}</div>
     {/if}
 
-    <section>
-      <h2>Art</h2>
-      <div class="species" role="radiogroup" aria-label="Art">
+    <Card.Root class="gap-3 py-4">
+      <Card.Header class="px-4">
+        <Card.Title class="text-sm">Art</Card.Title>
+      </Card.Header>
+      <Card.Content class="grid grid-cols-2 gap-2 px-4">
         {#each speciesList as s (s.key)}
           <button
-            role="radio"
-            aria-checked={s.key === species}
-            class:active={s.key === species}
+            class="flex flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors hover:bg-accent {s.key === species
+              ? 'border-primary bg-accent ring-1 ring-primary'
+              : ''}"
+            aria-pressed={s.key === species}
             onclick={() => (species = s.key)}
           >
-            <span>{s.name}</span>
-            <small>{s.latin}</small>
+            <span class="text-sm font-medium">{s.name}</span>
+            <span class="text-[11px] text-muted-foreground italic">{s.latin}</span>
           </button>
         {/each}
-      </div>
-    </section>
+      </Card.Content>
+    </Card.Root>
 
-    <section>
-      <h2>Kart</h2>
-      <div class="basemap" role="radiogroup" aria-label="Bakgrunnskart">
-        <button role="radio" aria-checked={basemap === 'kart'} class:active={basemap === 'kart'} onclick={() => (basemap = 'kart')}>
-          Kart
-        </button>
-        <button
-          role="radio"
-          aria-checked={basemap === 'flyfoto'}
-          class:active={basemap === 'flyfoto'}
-          disabled={!imageryAvailable}
-          title={imageryAvailable ? 'Flyfoto (Esri World Imagery)' : 'Flyfoto krever ESRI_API_KEY på serveren'}
-          onclick={() => (basemap = 'flyfoto')}
+    <Card.Root class="gap-3 py-4">
+      <Card.Header class="px-4">
+        <Card.Title class="flex items-center gap-2 text-sm"><Layers class="size-4" /> Kart</Card.Title>
+      </Card.Header>
+      <Card.Content class="flex flex-col gap-4 px-4">
+        <ToggleGroup.Root
+          type="single"
+          variant="outline"
+          class="w-full"
+          value={basemap}
+          onValueChange={(v) => v && (basemap = v as 'kart' | 'flyfoto')}
         >
-          Flyfoto
-        </button>
-      </div>
-      <label class="check">
-        <input type="checkbox" bind:checked={showHeatmap} /> Vis sannsynlighet
-      </label>
-      <label class="slider">
-        <span>Vis topp <strong>{topPct} %</strong></span>
-        <input type="range" min="1" max="100" step="1" bind:value={topPct} disabled={!showHeatmap} />
-      </label>
-      <Legend {topPct} />
-      <label class="slider">
-        <span>Gjennomsiktighet</span>
-        <input type="range" min="0" max="1" step="0.05" bind:value={opacity} disabled={!showHeatmap} />
-      </label>
-      <label class="check">
-        <input type="checkbox" bind:checked={showFindings} /> Vis registrerte funn (Artsdatabanken)
-      </label>
-      <label class="check">
-        <input type="checkbox" bind:checked={showTrails} /> Vis turstier (Kartverket)
-      </label>
-      {#if stravaAvailable}
-        <label class="check">
-          <input type="checkbox" bind:checked={showStravaHeat} /> Vis Strava heatmap
-        </label>
-        {#if showStravaHeat}
-          <select class="select" bind:value={stravaActivity} aria-label="Type aktivitet">
-            {#each STRAVA_ACTIVITIES as a (a.key)}
-              <option value={a.key}>{a.label}</option>
-            {/each}
-          </select>
+          <ToggleGroup.Item value="kart" class="flex-1">Kart</ToggleGroup.Item>
+          <ToggleGroup.Item
+            value="flyfoto"
+            class="flex-1"
+            disabled={!imageryAvailable}
+            title={imageryAvailable ? 'Flyfoto (Esri World Imagery)' : 'Flyfoto krever ESRI_API_KEY på serveren'}
+          >
+            Flyfoto
+          </ToggleGroup.Item>
+        </ToggleGroup.Root>
+
+        <div class="flex items-center justify-between">
+          <Label for="show-heatmap">Vis sannsynlighet</Label>
+          <Switch id="show-heatmap" bind:checked={showHeatmap} />
+        </div>
+        <div class="flex flex-col gap-2">
+          <div class="flex items-center justify-between text-sm">
+            <span>Vis topp</span>
+            <Badge variant="secondary">{topPct} %</Badge>
+          </div>
+          <Slider type="single" bind:value={topPct} min={1} max={100} step={1} disabled={!showHeatmap} />
+          <Legend {topPct} />
+        </div>
+        <div class="flex flex-col gap-2">
+          <div class="flex items-center justify-between text-sm">
+            <span>Gjennomsiktighet</span>
+            <span class="text-xs text-muted-foreground">{Math.round(opacity * 100)} %</span>
+          </div>
+          <Slider type="single" bind:value={opacity} min={0} max={1} step={0.05} disabled={!showHeatmap} />
+        </div>
+
+        <Separator />
+
+        <div class="flex items-center justify-between">
+          <Label for="show-findings">Registrerte funn (Artsdatabanken)</Label>
+          <Switch id="show-findings" bind:checked={showFindings} />
+        </div>
+        <div class="flex items-center justify-between">
+          <Label for="show-trails">Turstier (Kartverket, DNT)</Label>
+          <Switch id="show-trails" bind:checked={showTrails} />
+        </div>
+        {#if stravaAvailable}
+          <div class="flex items-center justify-between">
+            <Label for="show-strava">Strava heatmap</Label>
+            <Switch id="show-strava" bind:checked={showStravaHeat} />
+          </div>
+          {#if showStravaHeat}
+            <Select.Root type="single" bind:value={stravaActivity}>
+              <Select.Trigger class="w-full">
+                {STRAVA_ACTIVITIES.find((a) => a.key === stravaActivity)?.label}
+              </Select.Trigger>
+              <Select.Content>
+                {#each STRAVA_ACTIVITIES as a (a.key)}
+                  <Select.Item value={a.key} label={a.label}>{a.label}</Select.Item>
+                {/each}
+              </Select.Content>
+            </Select.Root>
+          {/if}
         {/if}
-      {/if}
-    </section>
+      </Card.Content>
+    </Card.Root>
 
     {#if groups.length}
-      <section>
-        <h2>Vekting</h2>
-        <div class="hint">
-          Hvor mye hver faktor teller i sannsynligheten. 100 % = modellens egen vekting, 0 % = se bort fra
-          faktoren.
-        </div>
-        {#each groups as g (g.key)}
-          <label class="slider">
-            <span class="weight-label">
-              <span>{g.label}</span>
-              <strong>{weightsPct[g.key] ?? 100} %</strong>
-            </span>
-            <input
-              type="range"
-              min="0"
-              max="200"
-              step="10"
-              value={weightsPct[g.key] ?? 100}
-              oninput={(e) => (weightsPct[g.key] = Number(e.currentTarget.value))}
-              disabled={!showHeatmap}
-            />
-            <small class="muted">Betydning i modellen: {Math.round(g.importance * 100)} %</small>
-          </label>
-        {/each}
-        <button class="action" onclick={resetWeights} disabled={!wParam}>Tilbakestill vekting</button>
-      </section>
+      <Collapsible.Root>
+        <Card.Root class="gap-3 py-4">
+          <Card.Header class="px-4">
+            <Collapsible.Trigger class="flex w-full items-center justify-between">
+              <Card.Title class="flex items-center gap-2 text-sm">
+                <SlidersHorizontal class="size-4" /> Vekting
+                {#if wParam}<Badge>tilpasset</Badge>{/if}
+              </Card.Title>
+              <ChevronDown class="size-4 text-muted-foreground" />
+            </Collapsible.Trigger>
+          </Card.Header>
+          <Collapsible.Content>
+            <Card.Content class="flex flex-col gap-4 px-4">
+              <p class="text-xs text-muted-foreground">
+                Hvor mye hver faktor teller. 100 % = modellens egen vekting, 0 % = se bort fra faktoren.
+              </p>
+              {#each groups as g (g.key)}
+                <div class="flex flex-col gap-2">
+                  <div class="flex items-baseline justify-between text-sm">
+                    <span>{g.label}</span>
+                    <span class="font-medium tabular-nums">{weightsPct[g.key] ?? 100} %</span>
+                  </div>
+                  <Slider
+                    type="single"
+                    value={weightsPct[g.key] ?? 100}
+                    onValueChange={(v) => (weightsPct[g.key] = v)}
+                    min={0}
+                    max={200}
+                    step={10}
+                    disabled={!showHeatmap}
+                  />
+                  <span class="text-[11px] text-muted-foreground">
+                    Betydning i modellen: {Math.round(g.importance * 100)} %
+                  </span>
+                </div>
+              {/each}
+              <Button variant="outline" size="sm" onclick={resetWeights} disabled={!wParam}>
+                <RotateCcw /> Tilbakestill vekting
+              </Button>
+            </Card.Content>
+          </Collapsible.Content>
+        </Card.Root>
+      </Collapsible.Root>
     {/if}
 
-    <section>
-      <h2>Mine funn</h2>
-      <button
-        class="action primary"
-        disabled={!gps}
-        title={gps ? `GPS ±${Math.round(gps.accuracy)} m` : 'Venter på GPS-posisjon'}
-        onclick={() => gps && registerFinding(gps.lat, gps.lon, gps.accuracy)}
-      >
-        📍 Registrer funn her
-      </button>
-      <div class="hint">Eller trykk på kartet og velg «Jeg fant … her».</div>
-      {#if findingMessage}
-        <div class="message">{findingMessage}</div>
-      {/if}
+    <Card.Root class="gap-3 py-4">
+      <Card.Header class="px-4">
+        <Card.Title class="flex items-center gap-2 text-sm"><MapPin class="size-4" /> Mine funn</Card.Title>
+      </Card.Header>
+      <Card.Content class="flex flex-col gap-3 px-4">
+        <Button
+          class="bg-success text-white hover:bg-success/90"
+          disabled={!gps}
+          title={gps ? `GPS ±${Math.round(gps.accuracy)} m` : 'Venter på GPS-posisjon'}
+          onclick={() => gps && registerFinding(gps.lat, gps.lon, gps.accuracy)}
+        >
+          <Crosshair /> Registrer funn her
+        </Button>
+        <p class="text-xs text-muted-foreground">Eller trykk på kartet og velg «Jeg fant … her».</p>
+        {#if findingMessage}
+          <div class="rounded-md bg-accent px-3 py-2 text-xs">{findingMessage}</div>
+        {/if}
 
-      <button class="list-toggle" onclick={() => (showMyList = !showMyList)} disabled={!myFindings.length}>
-        <span>{myFindings.length} funn lagret</span>
-        {#if myFindings.length}<span class="muted">{showMyList ? '▴ skjul' : '▾ vis'}</span>{/if}
-      </button>
-      {#if showMyList && myFindings.length}
-        <ul class="mine-list">
-          {#each myFindings as f (f.id)}
-            <li>
-              <span class="when">
-                {formatFoundAt(f.found_at)}
-                {#if f.accuracy_m !== null}<small>±{Math.round(f.accuracy_m)} m</small>{/if}
-              </span>
-              <span class="actions">
-                <button class="action" onclick={() => flyToFinding(f)}>Vis</button>
-                <button class="action" onclick={() => removeFinding(f.id)}>Slett</button>
-              </span>
-            </li>
-          {/each}
-        </ul>
-      {/if}
+        <Collapsible.Root bind:open={showMyList}>
+          <Collapsible.Trigger
+            class="flex w-full items-center justify-between text-sm font-medium disabled:opacity-60"
+            disabled={!myFindings.length}
+          >
+            <span>{myFindings.length} funn lagret</span>
+            {#if myFindings.length}<ChevronDown class="size-4 text-muted-foreground" />{/if}
+          </Collapsible.Trigger>
+          <Collapsible.Content>
+            <ul class="mt-2 flex max-h-56 flex-col divide-y overflow-y-auto rounded-md border text-xs">
+              {#each myFindings as f (f.id)}
+                <li class="flex items-center justify-between gap-2 px-2 py-1.5">
+                  <span>
+                    {formatFoundAt(f.found_at)}
+                    {#if f.accuracy_m !== null}<span class="text-muted-foreground">±{Math.round(f.accuracy_m)} m</span>{/if}
+                  </span>
+                  <span class="flex gap-1">
+                    <Button variant="outline" size="sm" class="h-7 px-2" onclick={() => flyToFinding(f)}>Vis</Button>
+                    <Button variant="ghost" size="sm" class="h-7 px-2 text-destructive" onclick={() => removeFinding(f.id)}>
+                      Slett
+                    </Button>
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          </Collapsible.Content>
+        </Collapsible.Root>
 
-      {#if status?.training}
-        <div class="message">Trener modellen… (noen minutter)</div>
-      {:else}
-        <button class="action" disabled={!myFindings.length} onclick={retrain}>Tren modellen med mine funn</button>
-      {/if}
-    </section>
+        {#if status?.training}
+          <div class="rounded-md bg-accent px-3 py-2 text-xs">Trener modellen… (noen minutter)</div>
+        {:else}
+          <Button variant="outline" disabled={!myFindings.length} onclick={retrain}>
+            <Sparkles /> Tren modellen med mine funn
+          </Button>
+        {/if}
+      </Card.Content>
+    </Card.Root>
 
     {#if status?.model}
-      <section class="about">
-        <h2>Om modellen</h2>
-        <dl>
-          <dt>Treffsikkerhet (AUC)</dt>
-          <dd>{status.model.cv_auc?.toFixed(2) ?? '–'}</dd>
-          <dt>Funn brukt i treningen</dt>
-          <dd>{status.model.n_findings_used ?? status.model.n_findings}{#if status.model.n_own_findings_used}, {status.model.n_own_findings_used} egne{/if}</dd>
-          {#if status.model.habitat}
-            <dt>Habitat</dt>
-            <dd>{status.model.habitat}</dd>
-          {/if}
-          <dt>Trent</dt>
-          <dd>{formatFoundAt(status.model.trained_at)}</dd>
-        </dl>
-      </section>
+      <div class="grid grid-cols-2 gap-x-3 gap-y-1 px-2 pb-2 text-[11px] text-muted-foreground">
+        <span>Treffsikkerhet (AUC)</span>
+        <span class="text-right text-foreground">{status.model.cv_auc?.toFixed(2) ?? '–'}</span>
+        <span>Funn i treningen</span>
+        <span class="text-right text-foreground">
+          {status.model.n_findings_used ?? status.model.n_findings}{#if status.model.n_own_findings_used}
+            ({status.model.n_own_findings_used} egne){/if}
+        </span>
+        {#if status.model.habitat}
+          <span>Habitat</span>
+          <span class="text-right text-foreground">{status.model.habitat}</span>
+        {/if}
+        <span>Trent</span>
+        <span class="text-right text-foreground">{formatFoundAt(status.model.trained_at)}</span>
+      </div>
     {/if}
   </aside>
 
   {#if sidebarOpen}
-    <button class="backdrop" onclick={() => (sidebarOpen = false)} aria-label="Lukk meny"></button>
+    <button
+      class="fixed inset-0 z-30 bg-black/30 md:hidden"
+      onclick={() => (sidebarOpen = false)}
+      aria-label="Lukk meny"
+    ></button>
   {/if}
 
-  <main class="map-area">
-    <div class="map" bind:this={mapEl}></div>
-    <button class="menu" onclick={() => (sidebarOpen = true)} aria-label="Åpne meny">☰</button>
+  <main class="relative min-w-0 flex-1">
+    <!-- h-full/w-full rather than absolute: MapLibre's own CSS sets position: relative. -->
+    <div class="h-full w-full" bind:this={mapEl}></div>
+    <Button
+      variant="secondary"
+      size="icon"
+      class="absolute top-[max(12px,env(safe-area-inset-top))] left-3 z-10 size-11 shadow-lg md:hidden"
+      onclick={() => (sidebarOpen = true)}
+      aria-label="Åpne meny"
+    >
+      <Menu />
+    </Button>
     {#if point || pointLoading || pointError}
       <PointPanel
         {point}
         loading={pointLoading}
         error={pointError}
         {status}
+        {routes}
         onclose={closePanel}
         onregister={(lat, lon) => registerFinding(lat, lon, null)}
       />
@@ -815,335 +961,24 @@
 </div>
 
 <style>
-  .layout {
-    display: flex;
-    height: 100%;
-  }
-
-  .sidebar {
-    width: 300px;
-    flex-shrink: 0;
-    overflow-y: auto;
-    background: var(--sidebar-bg);
-    color: var(--text);
-    border-right: 1px solid var(--border);
-    padding: max(14px, env(safe-area-inset-top)) 16px 20px max(16px, env(safe-area-inset-left));
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    font-size: 14px;
-    z-index: 4;
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .title {
-    font-weight: 700;
-    font-size: 18px;
-  }
-
-  h2 {
-    margin: 0 0 8px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-
-  section {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .species {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-  }
-
-  .species button {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text);
-    border-radius: 8px;
-    padding: 7px 9px;
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .species button span {
-    font-weight: 600;
-    font-size: 13px;
-  }
-
-  .species button small {
-    font-size: 11px;
-    font-style: italic;
-    color: var(--muted);
-  }
-
-  .species button.active {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    box-shadow: inset 0 0 0 1px var(--accent);
-  }
-
-  .basemap {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .basemap button {
-    border: none;
-    background: var(--surface);
-    color: var(--text);
-    padding: 6px;
-    font-size: 13px;
-    cursor: pointer;
-  }
-
-  .basemap button + button {
-    border-left: 1px solid var(--border);
-  }
-
-  .basemap button.active {
-    background: var(--accent-soft);
-    font-weight: 600;
-  }
-
-  .basemap button:disabled {
-    color: var(--muted);
-    cursor: default;
-  }
-
-  .select {
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
-    color: var(--text);
-    padding: 6px 8px;
-    font-size: 13px;
-  }
-
-  .check {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-  }
-
-  .slider {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-size: 13px;
-  }
-
-  .weight-label {
-    display: flex;
-    justify-content: space-between;
-  }
-
-  .slider input {
-    width: 100%;
-    accent-color: var(--accent);
-  }
-
-  .action {
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text);
-    border-radius: 8px;
-    padding: 8px 10px;
-    font-size: 13px;
-    cursor: pointer;
-  }
-
-  .action.primary {
-    background: var(--green);
-    border-color: var(--green);
-    color: #fff;
-    font-weight: 600;
-  }
-
-  .action:disabled,
-  .list-toggle:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-
-  .list-toggle {
-    display: flex;
-    justify-content: space-between;
-    border: none;
-    background: none;
-    color: var(--text);
-    padding: 4px 0 0;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .muted,
-  .hint {
-    color: var(--muted);
-    font-weight: 400;
-    font-size: 12px;
-  }
-
-  .message {
-    font-size: 12px;
-    background: var(--accent-soft);
-    border-radius: 6px;
-    padding: 6px 8px;
-  }
-
-  .mine-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    max-height: 220px;
-    overflow-y: auto;
-    font-size: 12px;
-  }
-
-  .mine-list li {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 0;
-    border-top: 1px solid var(--border);
-  }
-
-  .mine-list .when small {
-    color: var(--muted);
-    margin-left: 4px;
-  }
-
-  .mine-list .actions {
-    display: flex;
-    gap: 4px;
-  }
-
-  .mine-list .action {
-    padding: 3px 7px;
-    font-size: 12px;
-  }
-
-  .about dl {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 4px 10px;
-    margin: 0;
-    font-size: 12px;
-  }
-
-  .about dt {
-    color: var(--muted);
-  }
-
-  .about dd {
-    margin: 0;
-    text-align: right;
-  }
-
-  .warn {
-    background: #fff4d6;
-    color: #6b4a00;
-    border-radius: 6px;
-    padding: 6px 8px;
-    font-size: 12px;
-  }
-
-  .map-area {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-  }
-
-  .map {
-    position: absolute;
-    inset: 0;
-  }
-
-  .close,
-  .menu,
-  .backdrop {
-    display: none;
-  }
-
   :global(.finding-popup) {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     font-size: 13px;
   }
 
-  /* Phones: the sidebar becomes a drawer opened with the ☰ button. */
-  @media (max-width: 700px) {
-    .sidebar {
-      position: fixed;
-      top: 0;
-      bottom: 0;
-      left: 0;
-      width: min(320px, 86vw);
-      transform: translateX(-100%);
-      transition: transform 0.2s ease;
-      box-shadow: 2px 0 16px rgba(0, 0, 0, 0.25);
-    }
+  :global(.finding-popup a) {
+    color: var(--primary);
+  }
 
-    .sidebar.open {
-      transform: none;
-    }
-
-    .close {
-      display: block;
-      border: none;
-      background: none;
-      color: var(--muted);
-      font-size: 26px;
-      line-height: 1;
-      cursor: pointer;
-    }
-
-    .backdrop {
-      display: block;
-      position: fixed;
-      inset: 0;
-      z-index: 3;
-      border: none;
-      background: rgba(0, 0, 0, 0.3);
-    }
-
-    .menu {
-      display: block;
-      position: absolute;
-      top: max(10px, env(safe-area-inset-top));
-      left: max(10px, env(safe-area-inset-left));
-      z-index: 1;
-      width: 44px;
-      height: 44px;
-      border: none;
-      border-radius: 10px;
-      background: var(--sidebar-bg);
-      color: var(--text);
-      font-size: 20px;
-      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-      cursor: pointer;
-    }
+  :global(.finding-popup button) {
+    margin-top: 4px;
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) - 2px);
+    padding: 4px 8px;
+    background: transparent;
+    color: var(--destructive);
+    cursor: pointer;
   }
 </style>

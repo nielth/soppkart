@@ -68,6 +68,20 @@ SPECIES = {
             [5249504, 5249496],
             min_forest_pct=25,
         ),
+        Species(
+            "steinsopp",
+            "Steinsopp",
+            "Boletus edulis",
+            [5954958],
+            min_forest_pct=25,
+        ),
+        Species(
+            "svart_trompetsopp",
+            "Svart trompetsopp",
+            "Craterellus cornucopioides",
+            [2554662],
+            min_forest_pct=25,
+        ),
         # Grows in grazed grassland: not in forest, and not on fields worked by
         # tractors (crops, grass mowed for hay/silage).
         Species(
@@ -78,6 +92,10 @@ SPECIES = {
             max_forest_pct=50,
             max_cultivated_pct=50,
         ),
+        # The genus (spiselig morkel, toppmorkel), not the poisonous stenmorkel
+        # (Gyromitra). Grows in gardens, burnt ground, riverbanks and forest
+        # edges, so no habitat rule: the model learns it from the findings.
+        Species("morkel", "Morkel", "Morchella", [2594601]),
     ]
 }
 

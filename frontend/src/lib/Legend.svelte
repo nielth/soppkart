@@ -17,31 +17,11 @@
   const gradient = `linear-gradient(to right, ${ramp.map(([v, c]) => `${c} ${v * 100}%`).join(', ')})`
 </script>
 
-<div class="legend">
-  <div class="bar" style:background={gradient}></div>
-  <div class="labels">
+<div class="flex flex-col gap-1">
+  <div class="h-2.5 rounded-full border" style:background={gradient}></div>
+  <div class="flex justify-between text-[11px] text-muted-foreground">
     <span>Topp {topPct} %</span>
     <span>Beste</span>
   </div>
-  <div class="hint">Resten av habitatet er ufarget. Trykk på kartet for detaljer.</div>
+  <p class="text-[11px] text-muted-foreground">Resten av habitatet er ufarget. Trykk på kartet for detaljer.</p>
 </div>
-
-<style>
-  .bar {
-    height: 10px;
-    border-radius: 3px;
-    border: 1px solid rgba(0, 0, 0, 0.2);
-  }
-
-  .labels {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    color: var(--muted);
-  }
-
-  .hint {
-    font-size: 11px;
-    color: var(--muted);
-  }
-</style>

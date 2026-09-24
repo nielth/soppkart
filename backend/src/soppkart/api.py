@@ -7,6 +7,7 @@ import subprocess
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
+from xml.etree import ElementTree
 
 import httpx
 import numpy as np
@@ -220,6 +221,83 @@ async def strava_tile(activity: str, z: int, x: int, y: int) -> Response:
     return Response(
         res.content, media_type="image/png", headers=IMAGERY_HEADERS | {"X-Cache": "MISS"}
     )
+
+
+TRAILS_WMS = "https://wms.geonorge.no/skwms1/wms.friluftsruter2"
+TRAIL_LAYERS = {
+    "Fotrute": "Fotrute",
+    "Skiloype": "Skiløype",
+    "Sykkelrute": "Sykkelrute",
+    "AnnenRute": "Annen rute",
+}
+TRAIL_FIELDS = {
+    "rutenavn": "Navn",
+    "rutenummer": "Rutenummer",
+    "vedlikeholdsansvarlig": "Vedlikeholdes av",
+    "merking_d": "Merking",
+    "gradering_d": "Gradering",
+    "belysning": "Belysning",
+    "spesialrutetype_d": "Type",
+    "tilpasning_d": "Tilpasning",
+    "preparering_d": "Preparering",
+}
+TO_MERCATOR = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+_trails_client: httpx.AsyncClient | None = None
+
+
+@app.get("/api/trails")
+async def trails(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    tolerance_m: float = Query(20, gt=0, le=2000),
+) -> list[dict[str, Any]]:
+    """Kartverket's hiking/ski/cycle routes (Turrutebasen, incl. DNT/UT.no routes) near a spot."""
+    global _trails_client
+    if _trails_client is None:
+        _trails_client = httpx.AsyncClient(timeout=15)
+    x, y = TO_MERCATOR.transform(lon, lat)
+    # The WMS counts features within ~3 pixels of the queried pixel, so ask for a
+    # tiny 7 px image where 3 px ≈ tolerance_m, and query its middle pixel.
+    size = 7
+    half = tolerance_m * size / 6
+
+    res = await _trails_client.get(
+        TRAILS_WMS,
+        params={
+            "SERVICE": "WMS",
+            "VERSION": "1.3.0",
+            "REQUEST": "GetFeatureInfo",
+            "LAYERS": ",".join(TRAIL_LAYERS),
+            "QUERY_LAYERS": ",".join(TRAIL_LAYERS),
+            "STYLES": "",
+            "CRS": "EPSG:3857",
+            "BBOX": f"{x - half},{y - half},{x + half},{y + half}",
+            "WIDTH": str(size),
+            "HEIGHT": str(size),
+            "I": str(size // 2),
+            "J": str(size // 2),
+            "INFO_FORMAT": "application/vnd.ogc.gml",
+            "FEATURE_COUNT": "5",
+        },
+    )
+    if res.status_code != 200:
+        raise HTTPException(502, f"Kartverket svarte {res.status_code}")
+    routes = []
+    seen = set()
+    for layer in ElementTree.fromstring(res.content):
+        kind = TRAIL_LAYERS.get(layer.tag.removesuffix("_layer"))
+        for feature in layer:
+            fields = [
+                {"label": TRAIL_FIELDS[child.tag], "value": child.text.strip()}
+                for child in feature
+                if child.tag in TRAIL_FIELDS and child.text and child.text.strip()
+                if child.text.strip() != "Ukjent"
+            ]
+            key = (kind, tuple((f["label"], f["value"]) for f in fields))
+            if fields and key not in seen:
+                seen.add(key)
+                routes.append({"type": kind, "fields": fields})
+    return routes
 
 
 @app.get("/api/species")

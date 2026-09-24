@@ -367,7 +367,14 @@ def write_contributions(
 
 def write_findings_geojson(path: Path, findings: pl.DataFrame) -> None:
     """GBIF findings for the map, with the details shown when you tap one."""
-    latin = {5249504: "Cantharellus cibarius", 5249496: "Cantharellus pallens"}
+    latin = {
+        5249504: "Cantharellus cibarius",
+        5249496: "Cantharellus pallens",
+        5242507: "Psilocybe semilanceata",
+        5954958: "Boletus edulis",
+        2554662: "Craterellus cornucopioides",
+        2594601: "Morchella",
+    }
     features = [
         {
             "type": "Feature",
