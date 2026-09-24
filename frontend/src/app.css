@@ -103,15 +103,23 @@ body,
   overflow: hidden;
 }
 
-/* Popups for findings on the map (MapLibre renders these outside Svelte). */
-.maplibregl-popup-content {
+/* Popups for findings on the map (MapLibre renders these outside Svelte).
+   Prefixed with .maplibregl-map so they win over maplibre-gl.css, which loads
+   later and sets a white background (unreadable with dark mode's white text). */
+.maplibregl-map .maplibregl-popup-content {
   border-radius: var(--radius);
   background: var(--popover);
   color: var(--popover-foreground);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
 }
 
-.maplibregl-popup-tip {
+.maplibregl-map .maplibregl-popup-tip {
   border-top-color: var(--popover) !important;
   border-bottom-color: var(--popover) !important;
+}
+
+.maplibregl-map .maplibregl-popup-close-button {
+  color: var(--muted-foreground);
+  font-size: 18px;
+  padding: 0 6px;
 }
