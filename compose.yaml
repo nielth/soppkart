@@ -7,6 +7,8 @@
 #                       finds (default ./data next to this file)
 #   CDSE_S3_ACCESS_KEY  Copernicus Data Space keys, only needed to rebuild the
 #   CDSE_S3_SECRET_KEY  data from scratch (soppkart all)
+#   ESRI_API_KEY        ArcGIS Location Platform key for the aerial photo background
+#                       (optional; without it only the topo map is offered)
 services:
   backend:
     build: ./backend
@@ -17,6 +19,7 @@ services:
     environment:
       CDSE_S3_ACCESS_KEY: ${CDSE_S3_ACCESS_KEY:-}
       CDSE_S3_SECRET_KEY: ${CDSE_S3_SECRET_KEY:-}
+      ESRI_API_KEY: ${ESRI_API_KEY:-}
     networks:
       default:
         # Unique name: the frontend is also on public-caddy, where other stacks

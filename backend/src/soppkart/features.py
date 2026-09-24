@@ -119,6 +119,21 @@ FEATURES = [
 ]
 FEATURE_KEYS = [f.key for f in FEATURES]
 
+# Feature groups for the weight sliders in the map. Every feature is in exactly one group.
+FEATURE_GROUPS: list[tuple[str, str, list[str]]] = [
+    ("skog", "Skog", ["pct_lauv", "pct_furu", "pct_gran", "pct_bland", "tree_age", "bonitet"]),
+    (
+        "jordbruk",
+        "Jordbruk og beite",
+        ["pct_dyrket", "pct_apent", "pct_beite", "pct_aker", "pct_slatt", "pct_uslatt"],
+    ),
+    ("terreng", "Terreng", ["elevation", "slope", "aspect_east", "aspect_north"]),
+    ("jord", "Jordtype", ["soil"]),
+    ("vann", "Vann", ["dist_water"]),
+    ("nedbor", "Nedbør", ["precip"]),
+]
+assert sorted(k for _, _, keys in FEATURE_GROUPS for k in keys) == sorted(FEATURE_KEYS)
+
 # NGU løsmassetype codes grouped into broader soil classes. Index 0 = unknown.
 SOIL_CLASSES: list[tuple[str, list[int]]] = [
     ("Ukjent", [0, 1]),

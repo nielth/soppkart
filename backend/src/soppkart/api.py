@@ -15,10 +15,11 @@ from pydantic import BaseModel, Field
 from pyproj import Transformer
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.io import Reader
+from rio_tiler.utils import render
 
 from soppkart import config, features, userfindings
 from soppkart.colormap import DEFAULT_THRESHOLD, colormap
-from soppkart.train import ModelFiles, model_files
+from soppkart.train import CONTRIB_NODATA, CONTRIB_SCALE, ModelFiles, model_files
 
 app = FastAPI(title="Soppkart")
 
@@ -41,7 +42,52 @@ def get_files(species: str) -> ModelFiles:
 
 
 def is_ready(files: ModelFiles) -> bool:
-    return files.score.exists() and files.meta.exists() and features.FEATURES_PATH.exists()
+    return (
+        files.contrib.exists()
+        and files.reference.exists()
+        and files.meta.exists()
+        and features.FEATURES_PATH.exists()
+    )
+
+
+Weights = tuple[float, ...]
+N_GROUPS = len(features.FEATURE_GROUPS)
+
+
+def parse_weights(w: str | None) -> Weights:
+    """Weights per feature group from "1,0.5,..." (FEATURE_GROUPS order); default all 1."""
+    if not w:
+        return (1.0,) * N_GROUPS
+    try:
+        weights = tuple(round(float(v), 2) for v in w.split(","))
+    except ValueError:
+        raise HTTPException(422, "w må være tall adskilt med komma") from None
+    if len(weights) != N_GROUPS or not all(0 <= v <= 3 for v in weights):
+        raise HTTPException(422, f"w må ha {N_GROUPS} vekter mellom 0 og 3")
+    return weights
+
+
+@lru_cache(maxsize=16)
+def load_reference(path: Path, mtime: float) -> tuple[float, np.ndarray]:
+    with np.load(path) as ref:
+        return float(ref["bias"]), ref["contribs"]
+
+
+@lru_cache(maxsize=256)
+def reference_margins(path: Path, mtime: float, weights: Weights) -> np.ndarray:
+    """Sorted weighted log-odds of the background sample: the percentile scale."""
+    bias, contribs = load_reference(path, mtime)
+    return np.sort(bias + contribs @ np.asarray(weights, dtype=np.float32))
+
+
+def percentiles(files: ModelFiles, steps: np.ndarray, weights: Weights) -> np.ndarray:
+    """Percentile (0..1) of cells given their int8 group contributions (groups first axis)."""
+    mtime = files.reference.stat().st_mtime
+    bias, _ = load_reference(files.reference, mtime)
+    ref = reference_margins(files.reference, mtime, weights)
+    w = np.asarray(weights, dtype=np.float32)
+    margin = bias + CONTRIB_SCALE * np.tensordot(w, steps.astype(np.float32), axes=1)
+    return np.searchsorted(ref, margin) / len(ref)
 
 
 @lru_cache(maxsize=16)
@@ -51,6 +97,12 @@ def load_meta(path: Path, mtime: float) -> dict[str, Any]:
 
 def meta(files: ModelFiles) -> dict[str, Any]:
     return load_meta(files.meta, files.meta.stat().st_mtime)
+
+
+@app.get("/api/config")
+def client_config() -> dict[str, Any]:
+    """Settings the map needs. The Esri key is meant for browsers (restrict it by referrer)."""
+    return {"esri_api_key": config.ESRI_API_KEY}
 
 
 @app.get("/api/species")
@@ -76,15 +128,29 @@ def status(species: str) -> dict[str, Any]:
 
 
 @lru_cache(maxsize=4096)
-def render_tile(path: Path, z: int, x: int, y: int, threshold: float, mtime: float) -> bytes | None:
-    with Reader(str(path)) as src:
+def render_tile(
+    species: str, z: int, x: int, y: int, threshold: float, weights: Weights, mtime: float
+) -> bytes | None:
+    files = model_files(species)
+    with Reader(str(files.contrib)) as src:
         try:
             img = src.tile(x, y, z, tilesize=256)
         except TileOutsideBounds:
             return None
-    if not img.mask.any():
+    valid = img.mask > 0
+    if not valid.any():
         return None
-    return bytes(img.render(img_format="PNG", colormap=colormap(threshold)))
+    ranks = percentiles(files, np.asarray(img.data), weights)
+    # 1..255 = percentile, 0 = no data (see colormap).
+    values = np.where(valid, 1 + np.round(ranks * 254), 0).astype(np.uint8)
+    return bytes(
+        render(
+            values[np.newaxis],
+            mask=img.mask,
+            img_format="PNG",
+            colormap=colormap(threshold),
+        )
+    )
 
 
 @app.get("/api/{species}/tiles/{z}/{x}/{y}.png")
@@ -94,13 +160,15 @@ def tile(
     x: int,
     y: int,
     threshold: float = Query(DEFAULT_THRESHOLD, ge=0, le=0.99),
+    w: str | None = None,
 ) -> Response:
-    """Score tile. Scores below threshold (0..1) are transparent."""
+    """Score tile with weights w per feature group. Scores below threshold are transparent."""
     files = get_files(species)
     if not is_ready(files):
         return Response(status_code=204)
+    weights = parse_weights(w)
     threshold = round(threshold, 2)
-    png = render_tile(files.score, z, x, y, threshold, files.score.stat().st_mtime)
+    png = render_tile(species, z, x, y, threshold, weights, files.contrib.stat().st_mtime)
     if png is None:
         return Response(status_code=204, headers=CACHE_HEADERS)
     return Response(png, media_type="image/png", headers=CACHE_HEADERS)
@@ -127,21 +195,43 @@ def point(
     species: str,
     lat: float = Query(ge=-90, le=90),
     lon: float = Query(ge=-180, le=180),
+    w: str | None = None,
 ) -> dict[str, Any]:
     files = get_files(species)
     if not is_ready(files):
         raise HTTPException(503, "Modellen er ikke trent ennå")
+    weights = parse_weights(w)
     x, y = TO_GRID.transform(lon, lat)
     values = read_pixel(features.FEATURES_PATH, x, y)
-    score_px = read_pixel(files.score, x, y)
-    if values is None or score_px is None:
+    steps = read_pixel(files.contrib, x, y)
+    land = read_pixel(features.LAND_PATH, x, y)
+    if values is None or steps is None or land is None:
         return {"lat": lat, "lon": lon, "inside": False, "score": None, "features": []}
-    score_value = int(score_px[0])
+    in_habitat = bool(steps[0] != CONTRIB_NODATA)
+    score: float | None = None
+    groups: list[dict[str, Any]] = []
+    if in_habitat:
+        score = round(float(percentiles(files, steps, weights)), 3)
+        groups = [
+            {
+                "key": key,
+                "label": label,
+                "weight": weight,
+                # Weighted log-odds: > 0 pulls the score up here, < 0 pulls it down.
+                "contribution": round(float(step) * CONTRIB_SCALE * weight, 2),
+            }
+            for (key, label, _), step, weight in zip(
+                features.FEATURE_GROUPS, steps, weights, strict=True
+            )
+        ]
+    elif land[0]:
+        score = 0.0  # land, but outside the species' habitat
     return {
         "lat": lat,
         "lon": lon,
         "inside": True,
-        "score": None if score_value == 0 else round((score_value - 1) / 254, 3),
+        "score": score,
+        "groups": groups,
         "features": [
             {
                 "key": f.key,

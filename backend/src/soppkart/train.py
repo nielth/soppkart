@@ -1,10 +1,14 @@
-"""Train an XGBoost model per species and write its score raster.
+"""Train an XGBoost model per species and write its contribution raster.
 
 The model only sees nature features (forest, terrain, soil, water, land cover,
 rain). Registered findings are used only as training labels: cells with a
 finding are contrasted with a random sample of land cells ("background").
-Findings are presence-only, so scores are relative: the output raster holds
-each cell's percentile rank among all land cells.
+
+Instead of a finished score, each habitat cell stores how much each feature
+group (FEATURE_GROUPS) adds to the model's log-odds. The map adds these up with
+the user's weights (all 100 % = the model's own prediction) and ranks the
+result against the background sample, so scores are percentiles of the
+species' habitat in Norway.
 """
 
 import json
@@ -22,10 +26,11 @@ from rasterio.enums import Resampling
 from rasterio.windows import Window
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GroupKFold
-from xgboost import XGBClassifier
+from xgboost import DMatrix, XGBClassifier
 
 from soppkart import config, sources, userfindings
 from soppkart.features import (
+    FEATURE_GROUPS,
     FEATURE_KEYS,
     FEATURES,
     FEATURES_PATH,
@@ -45,8 +50,14 @@ class ModelFiles:
     dir: Path
 
     @property
-    def score(self) -> Path:
-        return self.dir / "score.tif"
+    def contrib(self) -> Path:
+        """Per-cell contribution of each feature group (int8, CONTRIB_SCALE per step)."""
+        return self.dir / "contrib.tif"
+
+    @property
+    def reference(self) -> Path:
+        """Bias and group contributions of the background sample, for percentiles."""
+        return self.dir / "reference.npz"
 
     @property
     def meta(self) -> Path:
@@ -66,6 +77,9 @@ def model_files(species_key: str) -> ModelFiles:
 
 
 BACKGROUND_RATIO = 10
+# Group contributions are log-odds stored as int8: value * CONTRIB_SCALE.
+CONTRIB_SCALE = 0.04
+CONTRIB_NODATA = -128
 BLOCK_SIZE_M = 50_000
 SEED = 42
 
@@ -76,10 +90,17 @@ def load_findings(grid: Grid, species: config.Species) -> pl.DataFrame:
     Findings outside the grid are dropped.
     """
     gbif = pl.read_parquet(sources.findings_path(species)).select(
-        "lat", "lon", "year", pl.col("uncertainty_m").cast(pl.Float64), source=pl.lit("gbif")
+        "lat",
+        "lon",
+        "year",
+        pl.col("uncertainty_m").cast(pl.Float64),
+        "gbif_id",
+        "taxon_key",
+        "basis",
+        source=pl.lit("gbif"),
     )
     own = userfindings.as_frame(species.key).with_columns(source=pl.lit("own"))
-    df = pl.concat([gbif, own])
+    df = pl.concat([gbif, own], how="diagonal_relaxed")
     to_grid = Transformer.from_crs("EPSG:4326", grid.crs, always_xy=True)
     x, y = to_grid.transform(df["lon"].to_numpy(), df["lat"].to_numpy())
     row, col = grid.rowcol(np.asarray(x), np.asarray(y))
@@ -101,6 +122,31 @@ def make_model() -> XGBClassifier:
         random_state=SEED,
         n_jobs=-1,
     )
+
+
+def group_matrix() -> np.ndarray:
+    """(features x groups) 0/1 matrix that sums feature contributions per group."""
+    matrix = np.zeros((len(FEATURE_KEYS), len(FEATURE_GROUPS)), dtype=np.float32)
+    for g, (_, _, keys) in enumerate(FEATURE_GROUPS):
+        for key in keys:
+            matrix[FEATURE_KEYS.index(key), g] = 1
+    return matrix
+
+
+def group_contributions(model: XGBClassifier, X: np.ndarray) -> tuple[np.ndarray, float]:
+    """Per-group log-odds contributions for rows of X, and the model's base value.
+
+    Uses XGBoost's fast approximate (Saabas) contributions: they add up exactly
+    to the model's output, at ~7x the cost of a prediction (exact SHAP is ~150x).
+    """
+    dmatrix = DMatrix(
+        X,
+        feature_types=["c" if f.categorical else "q" for f in FEATURES],
+        enable_categorical=True,
+    )
+    contribs = model.get_booster().predict(dmatrix, pred_contribs=True, approx_contribs=True)
+    bias = float(contribs[0, -1]) if len(contribs) else 0.0
+    return contribs[:, :-1] @ group_matrix(), bias
 
 
 FOREST_IDX = [FEATURE_KEYS.index(k) for k in ("pct_lauv", "pct_furu", "pct_gran", "pct_bland")]
@@ -194,7 +240,7 @@ def train(species: config.Species) -> None:
         pl.col("uncertainty_m").is_not_null()
         & (pl.col("uncertainty_m") <= config.FINDINGS_MAX_UNCERTAINTY_M)
     )
-    positives = precise.select("row", "col").unique()
+    positives = precise.select("row", "col").unique(maintain_order=True)
     n_own = int((precise["source"] == "own").sum())
     log.info(
         "%d findings, %d located within %d m (%d of them your own), in %d cells",
@@ -234,10 +280,13 @@ def train(species: config.Species) -> None:
     model.save_model(tmp_model)
     tmp_model.replace(files.model)
 
-    # The background is a uniform sample of land cells, so its predictions give
-    # the distribution needed to turn probabilities into Norway-wide percentiles.
-    reference = np.sort(model.predict_proba(X[y == 0])[:, 1])
-    write_score(files.score, grid, species, model, reference)
+    # The background is a uniform sample of habitat cells, so its contributions
+    # give the distribution needed to turn any weighting into percentiles.
+    bg_contribs, bias = group_contributions(model, X[y == 0])
+    tmp_ref = files.reference.with_suffix(".tmp.npz")
+    np.savez(tmp_ref, bias=bias, contribs=bg_contribs.astype(np.float32))
+    tmp_ref.replace(files.reference)
+    write_contributions(files.contrib, grid, species, model)
 
     # With importance_type="gain" every value is a float.
     importance = cast(dict[str, float], model.get_booster().get_score(importance_type="gain"))
@@ -261,6 +310,15 @@ def train(species: config.Species) -> None:
         "cv_auc": round(cv_auc, 4),
         "habitat": habitat_text(species),
         "feature_importance": feature_importance,
+        "groups": [
+            {
+                "key": key,
+                "label": label,
+                "importance": round(sum(feature_importance[k] for k in keys), 4),
+            }
+            for key, label, keys in FEATURE_GROUPS
+        ],
+        "contrib_scale": CONTRIB_SCALE,
     }
     write_findings_geojson(files.findings, findings.filter(pl.col("source") == "gbif"))
     # Meta last: its training time tells the map that a new version is ready.
@@ -270,51 +328,60 @@ def train(species: config.Species) -> None:
     log.info("done: %s", json.dumps(feature_importance))
 
 
-def write_score(
-    path: Path,
-    grid: Grid,
-    species: config.Species,
-    model: XGBClassifier,
-    reference: np.ndarray,
+def write_contributions(
+    path: Path, grid: Grid, species: config.Species, model: XGBClassifier
 ) -> None:
-    """Predict every habitat cell chunk by chunk and write percentile scores.
+    """Group contributions for every habitat cell, chunk by chunk (one band per group).
 
-    Scores are stored as uint8 1..255 (0 = no data). Land outside the species'
-    habitat gets 1, the lowest score. Written to a temporary file first, so the
-    map keeps serving the previous version until the new one is complete.
+    Stored as int8 log-odds (CONTRIB_SCALE per step, CONTRIB_NODATA outside the
+    habitat). Written to a temporary file first, so the map keeps serving the
+    previous version until the new one is complete. Overviews average the
+    contributions, which is exact since the score is linear in them.
     """
     meta = load_features_meta()
     tmp = path.with_suffix(".tmp.tif")
+    profile = raster_profile(grid, len(FEATURE_GROUPS), "int8") | {"nodata": CONTRIB_NODATA}
     with (
         rasterio.open(FEATURES_PATH) as fsrc,
         rasterio.open(LAND_PATH) as lsrc,
-        rasterio.open(tmp, "w", **raster_profile(grid, 1, "uint8")) as dst,
+        rasterio.open(tmp, "w", **profile) as dst,
     ):
+        for g, (key, _, _) in enumerate(FEATURE_GROUPS, start=1):
+            dst.set_band_description(g, key)
         for i, (row0, col0, height, width) in enumerate(meta["land_chunks"]):
             window = Window(col0, row0, width, height)  # type: ignore[call-arg]
-            land = lsrc.read(1, window=window).astype(bool)
             feats = fsrc.read(window=window)
-            ok = land & habitat(species, feats)
-            score = np.where(land, 1, 0).astype(np.uint8)
+            ok = lsrc.read(1, window=window).astype(bool) & habitat(species, feats)
+            out = np.full((len(FEATURE_GROUPS), height, width), CONTRIB_NODATA, dtype=np.int8)
             if ok.any():
-                proba = model.predict_proba(feats[:, ok].T)[:, 1]
-                ranks = np.searchsorted(reference, proba) / len(reference)
-                score[ok] = (1 + np.round(ranks * 254)).astype(np.uint8)
-            dst.write(score, 1, window=window)
+                contribs, _ = group_contributions(model, feats[:, ok].T)
+                steps = np.clip(np.round(contribs / CONTRIB_SCALE), -127, 127).astype(np.int8)
+                out[:, ok] = steps.T
+            dst.write(out, window=window)
             if i % 100 == 0:
-                log.info("scoring chunk %d/%d", i, len(meta["land_chunks"]))
+                log.info("contributions chunk %d/%d", i, len(meta["land_chunks"]))
     with rasterio.open(tmp, "r+") as dst:
-        dst.build_overviews([2, 4, 8, 16, 32, 64], Resampling.nearest)
+        dst.build_overviews([2, 4, 8, 16, 32, 64], Resampling.average)
     tmp.replace(path)
 
 
 def write_findings_geojson(path: Path, findings: pl.DataFrame) -> None:
+    """GBIF findings for the map, with the details shown when you tap one."""
+    latin = {5249504: "Cantharellus cibarius", 5249496: "Cantharellus pallens"}
     features = [
         {
             "type": "Feature",
             "geometry": {"type": "Point", "coordinates": [round(r["lon"], 5), round(r["lat"], 5)]},
-            "properties": {"year": r["year"]},
+            "properties": {
+                "gbif_id": r["gbif_id"],
+                "year": r["year"],
+                "uncertainty_m": r["uncertainty_m"],
+                "basis": r["basis"],
+                "taxon": latin.get(r["taxon_key"]),
+            },
         }
-        for r in findings.select("lon", "lat", "year").iter_rows(named=True)
+        for r in findings.select(
+            "lon", "lat", "year", "uncertainty_m", "gbif_id", "basis", "taxon_key"
+        ).iter_rows(named=True)
     ]
     path.write_text(json.dumps({"type": "FeatureCollection", "features": features}))

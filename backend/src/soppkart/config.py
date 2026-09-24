@@ -11,6 +11,10 @@ MODEL_DIR = DATA_DIR / "model"
 
 CRS = "EPSG:25833"
 
+# ArcGIS Location Platform API key for the aerial photo background (Esri World
+# Imagery). Optional: without it the map only offers Kartverket's topo map.
+ESRI_API_KEY = os.environ.get("ESRI_API_KEY") or None
+
 # Grid cell size in metres. Must be a multiple of 16 so SR16 (16 m) pixels
 # aggregate exactly into grid cells.
 RESOLUTION = int(os.environ.get("SOPPKART_RESOLUTION", "32"))

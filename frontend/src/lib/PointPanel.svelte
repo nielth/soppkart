@@ -25,6 +25,13 @@
     return Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1)
   }
 
+  // Largest absolute group contribution at this spot, for scaling the bars.
+  let maxContribution = $derived(
+    Math.max(0.01, ...(point?.groups ?? []).map((g) => Math.abs(g.contribution))),
+  )
+  let ownUsed = $derived(status?.model?.n_own_findings_used ?? 0)
+  let gbifUsed = $derived((status?.model?.n_findings_used ?? 0) - ownUsed)
+
   function importance(key: string): number | null {
     return status?.model?.feature_importance[key] ?? null
   }
@@ -51,16 +58,48 @@
           {/if}
         {/if}
       </div>
-      <button
-        class="register"
-        disabled={registered}
-        onclick={() => {
-          onregister(point!.lat, point!.lon)
-          registered = true
-        }}
-      >
-        {registered ? 'Lagret ✓' : `Jeg fant ${status?.model?.name ?? 'sopp'} her`}
-      </button>
+      {#if point.groups?.length}
+        <div class="section-title">Hva trekker opp og ned her</div>
+        <ul class="groups">
+          {#each point.groups as g (g.key)}
+            <li>
+              <span class="group-label">{g.label}{#if g.weight !== 1}<small> ({Math.round(g.weight * 100)} %)</small>{/if}</span>
+              <span class="diverging">
+                <span
+                  class="bar"
+                  class:up={g.contribution > 0}
+                  class:down={g.contribution < 0}
+                  style:width="{(Math.abs(g.contribution) / maxContribution) * 50}%"
+                ></span>
+              </span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      <div class="source">
+        Beregnet fra naturdataene under. Modellen har lært vektingen fra {gbifUsed} registrerte funn
+        (Artsdatabanken via GBIF){#if ownUsed} og {ownUsed} egne funn{/if}, ikke fra funn akkurat her.
+      </div>
+      <div class="actions">
+        <a
+          class="maps"
+          href="https://www.google.com/maps/search/?api=1&query={point.lat.toFixed(6)},{point.lon.toFixed(6)}"
+          target="_blank"
+          rel="noopener"
+        >
+          Åpne i Google Maps ↗
+        </a>
+        <button
+          class="register"
+          disabled={registered}
+          onclick={() => {
+            onregister(point!.lat, point!.lon)
+            registered = true
+          }}
+        >
+          {registered ? 'Lagret ✓' : `Jeg fant ${status?.model?.name ?? 'sopp'} her`}
+        </button>
+      </div>
       <table>
         <tbody>
           {#each point.features as f (f.key)}
@@ -151,6 +190,22 @@
     margin-top: 6px;
   }
 
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .maps {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 13px;
+    color: var(--text);
+    text-decoration: none;
+  }
+
   .register {
     border: 1px solid #1a9641;
     background: transparent;
@@ -158,8 +213,62 @@
     border-radius: 6px;
     padding: 5px 8px;
     font-size: 13px;
-    margin-bottom: 8px;
     cursor: pointer;
+  }
+
+  .section-title {
+    font-size: 12px;
+    font-weight: 600;
+    margin: 4px 0;
+  }
+
+  .groups {
+    list-style: none;
+    margin: 0 0 6px;
+    padding: 0;
+    font-size: 12px;
+  }
+
+  .groups li {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+  }
+
+  .groups small {
+    color: var(--muted);
+  }
+
+  /* Bars grow right (green, pulls up) or left (red, pulls down) from the middle. */
+  .diverging {
+    position: relative;
+    height: 8px;
+    background: linear-gradient(to right, transparent calc(50% - 0.5px), var(--border) calc(50% - 0.5px), var(--border) calc(50% + 0.5px), transparent calc(50% + 0.5px));
+  }
+
+  .bar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: 2px;
+  }
+
+  .bar.up {
+    left: 50%;
+    background: #1a9641;
+  }
+
+  .bar.down {
+    right: 50%;
+    background: #d7301f;
+  }
+
+  .source {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 8px;
   }
 
   .habitat {

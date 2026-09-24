@@ -22,6 +22,8 @@ export interface Status {
     n_background_cells: number
     cv_auc: number | null
     habitat: string | null
+    /** Feature groups in the order the backend expects weights in. */
+    groups: { key: string; label: string; importance: number }[]
     feature_importance: Record<string, number>
   } | null
 }
@@ -33,11 +35,20 @@ export interface FeatureValue {
   unit: string
 }
 
+export interface GroupContribution {
+  key: string
+  label: string
+  weight: number
+  /** Weighted log-odds: > 0 pulls the score up at this spot, < 0 pulls it down. */
+  contribution: number
+}
+
 export interface PointInfo {
   lat: number
   lon: number
   inside: boolean
   score: number | null
+  groups?: GroupContribution[]
   features: FeatureValue[]
 }
 
@@ -58,16 +69,34 @@ export function fetchStatus(species: string): Promise<Status> {
   return getJson<Status>(`/api/${species}/status`)
 }
 
-export function fetchPoint(species: string, lat: number, lon: number): Promise<PointInfo> {
-  return getJson<PointInfo>(`/api/${species}/point?lat=${lat.toFixed(6)}&lon=${lon.toFixed(6)}`)
+/** weights: "w" parameter from weightsParam, or '' for the model's own weighting. */
+export function fetchPoint(species: string, lat: number, lon: number, weights: string): Promise<PointInfo> {
+  const params = new URLSearchParams({ lat: lat.toFixed(6), lon: lon.toFixed(6) })
+  if (weights) params.set('w', weights)
+  return getJson<PointInfo>(`/api/${species}/point?${params}`)
+}
+
+/**
+ * The "w" parameter for group weights in percent, in the backend's group order.
+ * Empty when every weight is 100 %, i.e. the model's own prediction.
+ */
+export function weightsParam(groups: { key: string }[], weightsPct: Record<string, number>): string {
+  const values = groups.map((g) => (weightsPct[g.key] ?? 100) / 100)
+  return values.every((v) => v === 1) ? '' : values.join(',')
 }
 
 /**
  * Score tiles. The model version (training time) is in the URL so a retrained
  * map never shows cached tiles; scores below threshold (0..1) are transparent.
  */
-export function tilesUrl(species: string, version: string | undefined, threshold: number): string {
+export function tilesUrl(
+  species: string,
+  version: string | undefined,
+  threshold: number,
+  weights: string,
+): string {
   const params = new URLSearchParams({ threshold: threshold.toFixed(2) })
+  if (weights) params.set('w', weights)
   if (version) params.set('v', version)
   return `${location.origin}/api/${species}/tiles/{z}/{x}/{y}.png?${params}`
 }
@@ -123,4 +152,20 @@ export async function fetchMyFindings(species: string): Promise<MyFinding[]> {
 /** Date and time a finding was saved, in Norwegian format. */
 export function formatFoundAt(foundAt: string): string {
   return new Date(foundAt).toLocaleString('no', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+export interface ClientConfig {
+  esri_api_key: string | null
+}
+
+export function fetchConfig(): Promise<ClientConfig> {
+  return getJson<ClientConfig>('/api/config')
+}
+
+/** Esri World Imagery tiles (needs an ArcGIS Location Platform API key). */
+export function imageryUrl(apiKey: string): string {
+  return (
+    'https://static-map-tiles-api.arcgis.com/arcgis/rest/services/static-basemap-tiles-service/v1/' +
+    `arcgis/imagery/static/tile/{z}/{y}/{x}?token=${encodeURIComponent(apiKey)}`
+  )
 }

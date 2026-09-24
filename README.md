@@ -54,7 +54,13 @@ whatever the resolution.
 - **Species:** pick kantarell or spiss fleinsopp at the top of the panel.
 - **Vis topp X %:** the slider decides how much of the species' habitat is coloured (default 5 %).
   At 10 % only the best tenth is shown, and the colour scale stretches over that part.
-- **Tap the map** for the score and all feature values of that square.
+- **Vekting:** one slider per factor group (skog, jordbruk og beite, terreng, jordtype, vann,
+  nedbør), 0–200 %. 100 % everywhere is the model's own prediction; 0 % ignores a group, 200 %
+  doubles its say. The map and the tapped point update within a second.
+- **Tap the map** for the score, how much each factor group pulls it up or down at that spot, and
+  all feature values of that square.
+- **Registrerte funn:** tick "Vis registrerte funn" to see the GBIF/Artsdatabanken findings the model
+  learned from; tap a point for its details (year, precision, type) and a link to GBIF.
 - **Your own finds:** "📍 Registrer funn her" saves your GPS position (only positions accurate to
   50 m are used for training), or tap a spot and choose "Jeg fant … her". Your finds are green
   dots; tap one to delete it. "Tren modellen med mine funn" retrains that species in the
@@ -102,7 +108,11 @@ squares.
 
 - **Evaluation:** spatial 5-fold cross-validation with ~50 km blocks. The AUC it reports reflects
   performance in areas the model has not seen.
-- **Map score:** each land cell's percentile rank across Norway (100 = among the best).
+- **Map score:** each habitat cell's percentile rank across Norway (100 = among the best).
+- **Weights:** training stores, per habitat cell, how much each feature group adds to the model's
+  log-odds (`contrib.tif`, XGBoost's approximate Saabas contributions, which add up exactly to the
+  prediction). The map combines them with the user's weights and ranks the result against the
+  background sample (`reference.npz`).
 
 **Caveat:** findings cluster where people go mushroom picking, near cities and roads. Some of
 what the model learns is therefore "where people report findings" rather than purely where
