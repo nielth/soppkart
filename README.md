@@ -67,6 +67,8 @@ whatever the resolution.
   `ESRI_API_KEY` is set: an ArcGIS Location Platform API key with only the Basemaps privilege.
   The backend fetches the tiles (`/api/imagery/...`), so the key never reaches the browser. If the
   key is restricted by referrer, set `ESRI_REFERER` to that address.
+  Tiles are cached in the stack's Redis (memory only, 512 MB) for as long as Esri allows (24 h),
+  so the same photos aren't requested again.
 - **Registrerte funn:** tick "Vis registrerte funn" to see the GBIF/Artsdatabanken findings the model
   learned from; tap a point for its details (year, precision, type) and a link to GBIF.
 - **Your own finds:** "📍 Registrer funn her" saves your GPS position (only positions accurate to

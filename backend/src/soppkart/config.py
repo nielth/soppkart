@@ -17,6 +17,11 @@ CRS = "EPSG:25833"
 ESRI_API_KEY = os.environ.get("ESRI_API_KEY") or None
 # Sent as Referer to Esri, for keys restricted to a site (e.g. https://soppkart.nielth.com).
 ESRI_REFERER = os.environ.get("ESRI_REFERER") or None
+# Redis for caching aerial photo tiles (optional; without it every tile goes to Esri).
+REDIS_URL = os.environ.get("REDIS_URL") or None
+# Used when Esri doesn't say how long a tile may be cached (it normally says 24 h).
+IMAGERY_CACHE_DEFAULT_S = 86_400
+
 ESRI_IMAGERY_URL = (
     "https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 )

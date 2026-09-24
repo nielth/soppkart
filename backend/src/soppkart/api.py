@@ -2,14 +2,16 @@
 
 import json
 import math
+import re
 import subprocess
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import numpy as np
 import rasterio
+import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
@@ -107,30 +109,85 @@ def client_config() -> dict[str, Any]:
 
 
 _esri_client: httpx.AsyncClient | None = None
+_redis: redis.Redis | None = None
+IMAGERY_HEADERS = {"Cache-Control": "public, max-age=86400"}
+# Cached "no tile here" answers, so missing tiles aren't requested again and again.
+NO_TILE = b"-"
+
+
+def esri_client() -> httpx.AsyncClient:
+    global _esri_client
+    if _esri_client is None:
+        headers = {"Referer": config.ESRI_REFERER} if config.ESRI_REFERER else {}
+        _esri_client = httpx.AsyncClient(timeout=20, headers=headers)
+    return _esri_client
+
+
+def redis_client() -> redis.Redis | None:
+    global _redis
+    if _redis is None and config.REDIS_URL:
+        _redis = redis.Redis.from_url(config.REDIS_URL, socket_timeout=1)
+    return _redis
+
+
+def cache_seconds(res: httpx.Response) -> int:
+    """How long Esri allows a tile to be cached (its Cache-Control max-age)."""
+    match = re.search(r"max-age=(\d+)", res.headers.get("cache-control", ""))
+    return int(match.group(1)) if match else config.IMAGERY_CACHE_DEFAULT_S
+
+
+async def cache_get(key: str) -> bytes | None:
+    cache = redis_client()
+    if cache is None:
+        return None
+    try:
+        return cast(bytes | None, await cache.get(key))
+    except redis.RedisError:
+        return None  # a broken cache must not break the map
+
+
+async def cache_set(key: str, value: bytes, seconds: int) -> None:
+    cache = redis_client()
+    if cache is None or seconds <= 0:
+        return
+    try:
+        await cache.set(key, value, ex=seconds)
+    except redis.RedisError:
+        pass
 
 
 @app.get("/api/imagery/{z}/{x}/{y}.jpg")
 async def imagery(z: int, x: int, y: int) -> Response:
-    """Aerial photo tile from Esri World Imagery, fetched here so the API key stays secret."""
-    global _esri_client
+    """Aerial photo tile from Esri World Imagery.
+
+    Fetched here so the API key stays secret, and cached in Redis for as long as
+    Esri allows (24 h), so the same photos aren't requested over and over.
+    """
     if config.ESRI_API_KEY is None:
         raise HTTPException(404, "Flyfoto er ikke satt opp (ESRI_API_KEY)")
     if not (0 <= z <= 23 and 0 <= x < 2**z and 0 <= y < 2**z):
         raise HTTPException(404, "Ugyldig flis")
-    if _esri_client is None:
-        headers = {"Referer": config.ESRI_REFERER} if config.ESRI_REFERER else {}
-        _esri_client = httpx.AsyncClient(timeout=20, headers=headers)
-    res = await _esri_client.get(
+    key = f"imagery:{z}:{x}:{y}"
+    cached = await cache_get(key)
+    if cached == NO_TILE:
+        return Response(status_code=204, headers={"X-Cache": "HIT"})
+    if cached is not None:
+        return Response(
+            cached, media_type="image/jpeg", headers=IMAGERY_HEADERS | {"X-Cache": "HIT"}
+        )
+    res = await esri_client().get(
         config.ESRI_IMAGERY_URL.format(z=z, x=x, y=y), params={"token": config.ESRI_API_KEY}
     )
     if res.status_code == 404:
-        return Response(status_code=204)
+        await cache_set(key, NO_TILE, cache_seconds(res))
+        return Response(status_code=204, headers={"X-Cache": "MISS"})
     if res.status_code != 200 or not res.headers.get("content-type", "").startswith("image/"):
         raise HTTPException(502, f"Esri svarte {res.status_code}")
+    await cache_set(key, res.content, cache_seconds(res))
     return Response(
         res.content,
         media_type=res.headers["content-type"],
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers=IMAGERY_HEADERS | {"X-Cache": "MISS"},
     )
 
 

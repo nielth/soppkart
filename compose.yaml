@@ -22,12 +22,26 @@ services:
       CDSE_S3_SECRET_KEY: ${CDSE_S3_SECRET_KEY:-}
       ESRI_API_KEY: ${ESRI_API_KEY:-}
       ESRI_REFERER: ${ESRI_REFERER:-}
+      REDIS_URL: redis://soppkart-redis:6379/0
+    depends_on:
+      - redis
     networks:
       default:
         # Unique name: the frontend is also on public-caddy, where other stacks
         # may have a service called "backend".
         aliases:
           - soppkart-backend
+    restart: unless-stopped
+
+  # In-memory cache for aerial photo tiles: 512 MB, least recently used tiles are
+  # dropped first, nothing is written to disk. Only on the internal network.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    networks:
+      default:
+        aliases:
+          - soppkart-redis
     restart: unless-stopped
 
   # Serves the app and proxies /api to the backend over the internal network.
