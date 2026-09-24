@@ -207,6 +207,8 @@ async def strava_tile(activity: str, z: int, x: int, y: int) -> Response:
         raise HTTPException(404, "Ugyldig flis")
     key = f"strava:{activity}:{z}:{x}:{y}"
     cached = await cache_get(key)
+    if cached == NO_TILE:
+        return Response(status_code=204, headers={"X-Cache": "HIT"})
     if cached is not None:
         return Response(
             cached, media_type="image/png", headers=IMAGERY_HEADERS | {"X-Cache": "HIT"}
@@ -217,10 +219,22 @@ async def strava_tile(activity: str, z: int, x: int, y: int) -> Response:
         raise HTTPException(503, str(err)) from None
     if res.status_code != 200 or not res.headers.get("content-type", "").startswith("image/"):
         raise HTTPException(502, f"Strava svarte {res.status_code}")
+    if is_empty_strava_tile(res.content):
+        await cache_set(key, NO_TILE, cache_seconds(res))
+        return Response(status_code=204, headers={"X-Cache": "MISS"})
     await cache_set(key, res.content, cache_seconds(res))
     return Response(
         res.content, media_type="image/png", headers=IMAGERY_HEADERS | {"X-Cache": "MISS"}
     )
+
+
+def is_empty_strava_tile(png: bytes) -> bool:
+    """Strava answers tiles without activity with an opaque all-black grayscale PNG.
+
+    Real heatmap tiles are palette PNGs with transparency, so the PNG colour type
+    in the header (byte 25; 0 = grayscale without alpha) tells them apart.
+    """
+    return len(png) > 25 and png[:8] == b"\x89PNG\r\n\x1a\n" and png[25] == 0
 
 
 TRAILS_WMS = "https://wms.geonorge.no/skwms1/wms.friluftsruter2"
