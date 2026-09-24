@@ -784,6 +784,16 @@
           <Label for="show-trails">Turstier (Kartverket, DNT)</Label>
           <Switch id="show-trails" bind:checked={showTrails} />
         </div>
+        {#if showTrails}
+          <div class="-mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <span class="flex items-center gap-1"><span class="h-1 w-4 rounded bg-[#7b1fa2]"></span> Fotrute</span>
+            <span class="flex items-center gap-1">
+              <span class="h-0 w-4 border-t-2 border-dashed border-[#0d47a1]"></span> Skiløype
+            </span>
+            <span class="flex items-center gap-1"><span class="h-1 w-4 rounded bg-[#2e7d32]"></span> Sykkel</span>
+            <span class="flex items-center gap-1"><span class="h-0.5 w-4 rounded bg-[#616161]"></span> Annet</span>
+          </div>
+        {/if}
         {#if stravaAvailable}
           <div class="flex items-center justify-between">
             <Label for="show-strava">Strava heatmap</Label>

@@ -168,11 +168,35 @@ export function fetchConfig(): Promise<ClientConfig> {
 /** Aerial photo tiles (Esri World Imagery), fetched through our backend so the API key stays secret. */
 export const IMAGERY_URL = `${location.origin}/api/imagery/{z}/{x}/{y}.jpg`
 
+/** An SLD line style: a white casing under a coloured line, so routes stand out from roads. */
+function sldRouteLayer(name: string, color: string, width: number, dash?: string): string {
+  const dasharray = dash ? `<CssParameter name="stroke-dasharray">${dash}</CssParameter>` : ''
+  return (
+    `<NamedLayer><Name>${name}</Name><UserStyle><FeatureTypeStyle><Rule>` +
+    `<LineSymbolizer><Stroke><CssParameter name="stroke">#ffffff</CssParameter>` +
+    `<CssParameter name="stroke-width">${width + 2.5}</CssParameter>` +
+    `<CssParameter name="stroke-opacity">0.9</CssParameter></Stroke></LineSymbolizer>` +
+    `<LineSymbolizer><Stroke><CssParameter name="stroke">${color}</CssParameter>` +
+    `<CssParameter name="stroke-width">${width}</CssParameter>${dasharray}</Stroke></LineSymbolizer>` +
+    `</Rule></FeatureTypeStyle></UserStyle></NamedLayer>`
+  )
+}
+
+/** Our own colours for Turrutebasen: purple footpaths, dashed blue ski trails, green cycle routes. */
+const TRAILS_SLD =
+  '<StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" xmlns:ogc="http://www.opengis.net/ogc">' +
+  sldRouteLayer('Fotrute', '#7b1fa2', 2.5) +
+  sldRouteLayer('Skiloype', '#0d47a1', 2, '6 4') +
+  sldRouteLayer('Sykkelrute', '#2e7d32', 2) +
+  sldRouteLayer('AnnenRute', '#616161', 1.5) +
+  '</StyledLayerDescriptor>'
+
 /** Kartverket's Turrutebasen (hiking, ski, cycle and other routes) as transparent WMS tiles. */
 export const TRAILS_URL =
   'https://wms.geonorge.no/skwms1/wms.friluftsruter2?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
   '&LAYERS=Fotrute,Skiloype,Sykkelrute,AnnenRute&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}' +
-  '&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true'
+  '&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true' +
+  `&SLD_BODY=${encodeURIComponent(TRAILS_SLD)}`
 
 /** Strava heatmap types (Strava's own names) with their labels in the map. */
 export const STRAVA_ACTIVITIES = [
