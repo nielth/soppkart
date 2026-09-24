@@ -2,6 +2,9 @@
   import { onMount } from 'svelte'
   import * as maplibregl from 'maplibre-gl'
   import 'maplibre-gl/dist/maplibre-gl.css'
+  // MapLibre runs GeoJSON layers in a web worker loaded from a separate file.
+  // Let Vite bundle it (with its imports) and tell MapLibre where it ends up.
+  import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
   import {
     addMyFinding,
     deleteMyFinding,
@@ -57,6 +60,8 @@
   let tilesTimer: ReturnType<typeof setTimeout> | undefined
 
   const TILE_BASE = 'https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png'
+
+  maplibregl.setWorkerUrl(workerUrl)
 
   onMount(() => {
     map = new maplibregl.Map({
