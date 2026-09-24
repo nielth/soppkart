@@ -33,11 +33,11 @@ services:
           - soppkart-backend
     restart: unless-stopped
 
-  # In-memory cache for aerial photo tiles: 512 MB, least recently used tiles are
+  # In-memory cache for aerial photo tiles: 1 GB, least recently used tiles are
   # dropped first, nothing is written to disk. Only on the internal network.
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    command: ["redis-server", "--maxmemory", "1gb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
     networks:
       default:
         aliases:
