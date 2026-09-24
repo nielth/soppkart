@@ -34,6 +34,7 @@ Settings go in `.env` (or the stack's Environment in Komodo):
 | --- | --- |
 | `SOPPKART_DATA` | Host folder for features, models, findings and your own finds (default `./data`) |
 | `CDSE_S3_ACCESS_KEY`, `CDSE_S3_SECRET_KEY` | Copernicus keys, only needed when rebuilding data from scratch |
+| `ESRI_API_KEY`, `ESRI_REFERER` | Optional: aerial photo background (see Using the map) |
 
 The raw downloads (~21 GB) live in the named volume `raw`; they are only needed to rebuild the
 features. Everything the running site needs is in `SOPPKART_DATA`: `features/`, `model/`,
@@ -63,8 +64,9 @@ whatever the resolution.
   other routes) over the map; "Åpne Strava heatmap her" opens Strava's global heatmap at the same
   spot (Strava's own tiles need a Strava login and can't be embedded).
 - **Kart / Flyfoto:** switch the background to aerial photos (Esri World Imagery) when
-  `ESRI_API_KEY` is set: an ArcGIS Location Platform API key with only the Basemaps privilege,
-  restricted to your site's address.
+  `ESRI_API_KEY` is set: an ArcGIS Location Platform API key with only the Basemaps privilege.
+  The backend fetches the tiles (`/api/imagery/...`), so the key never reaches the browser. If the
+  key is restricted by referrer, set `ESRI_REFERER` to that address.
 - **Registrerte funn:** tick "Vis registrerte funn" to see the GBIF/Artsdatabanken findings the model
   learned from; tap a point for its details (year, precision, type) and a link to GBIF.
 - **Your own finds:** "📍 Registrer funn her" saves your GPS position (only positions accurate to

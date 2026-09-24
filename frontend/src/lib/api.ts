@@ -155,23 +155,16 @@ export function formatFoundAt(foundAt: string): string {
 }
 
 export interface ClientConfig {
-  esri_api_key: string | null
+  /** Whether the server has an Esri key and can serve aerial photos. */
+  imagery: boolean
 }
 
 export function fetchConfig(): Promise<ClientConfig> {
   return getJson<ClientConfig>('/api/config')
 }
 
-/**
- * Esri World Imagery image tiles (needs an ArcGIS Location Platform API key with the
- * Basemaps privilege). The static basemap tiles service has no plain imagery style.
- */
-export function imageryUrl(apiKey: string): string {
-  return (
-    'https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}' +
-    `?token=${encodeURIComponent(apiKey)}`
-  )
-}
+/** Aerial photo tiles (Esri World Imagery), fetched through our backend so the API key stays secret. */
+export const IMAGERY_URL = `${location.origin}/api/imagery/{z}/{x}/{y}.jpg`
 
 /** Kartverket's Turrutebasen (hiking, ski, cycle and other routes) as transparent WMS tiles. */
 export const TRAILS_URL =

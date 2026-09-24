@@ -16,7 +16,7 @@
     formatFoundAt,
     fetchStatus,
     findingsUrl,
-    imageryUrl,
+    IMAGERY_URL,
     stravaHeatmapUrl,
     TRAILS_URL,
     myFindingsUrl,
@@ -69,7 +69,7 @@
   let wParam = $derived(weightsParam(groups, weightsPct))
   // Background: Kartverket's topo map, or aerial photos when an Esri key is configured.
   let basemap = $state<'kart' | 'flyfoto'>(loadBasemap())
-  let esriKey = $state<string | null>(null)
+  let imageryAvailable = $state(false)
   let trainPoll: ReturnType<typeof setInterval> | undefined
   let tilesTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -113,7 +113,7 @@
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left')
 
     map.on('load', () => {
-      if (esriKey) addImagery(esriKey)
+      if (imageryAvailable) addImagery()
       map!.addSource('score', {
         type: 'raster',
         tiles: [tilesUrl(species, status?.model?.trained_at, threshold, wParam)],
@@ -247,10 +247,10 @@
 
     fetchConfig()
       .then((c) => {
-        esriKey = c.esri_api_key
-        if (esriKey && map?.isStyleLoaded() && !map.getLayer('imagery')) addImagery(esriKey)
+        imageryAvailable = c.imagery
+        if (imageryAvailable && map?.isStyleLoaded() && !map.getLayer('imagery')) addImagery()
       })
-      .catch(() => (esriKey = null))
+      .catch(() => (imageryAvailable = false))
 
     fetchSpecies()
       .then((list) => {
@@ -445,10 +445,10 @@
   }
 
   /** Aerial photo layer, drawn right above the topo map and below everything else. */
-  function addImagery(apiKey: string) {
+  function addImagery() {
     map!.addSource('imagery', {
       type: 'raster',
-      tiles: [imageryUrl(apiKey)],
+      tiles: [IMAGERY_URL],
       tileSize: 256,
       maxzoom: 19,
       attribution:
@@ -535,7 +535,7 @@
   })
 
   $effect(() => {
-    const showImagery = basemap === 'flyfoto' && esriKey !== null
+    const showImagery = basemap === 'flyfoto' && imageryAvailable
     saveBasemap(basemap)
     if (!mapLoaded || !map || !map.getLayer('imagery')) return
     map.setLayoutProperty('imagery', 'visibility', showImagery ? 'visible' : 'none')
@@ -641,8 +641,8 @@
           role="radio"
           aria-checked={basemap === 'flyfoto'}
           class:active={basemap === 'flyfoto'}
-          disabled={!esriKey}
-          title={esriKey ? 'Flyfoto (Esri World Imagery)' : 'Flyfoto krever ESRI_API_KEY på serveren'}
+          disabled={!imageryAvailable}
+          title={imageryAvailable ? 'Flyfoto (Esri World Imagery)' : 'Flyfoto krever ESRI_API_KEY på serveren'}
           onclick={() => (basemap = 'flyfoto')}
         >
           Flyfoto

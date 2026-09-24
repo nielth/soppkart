@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import httpx
 import numpy as np
 import rasterio
 from fastapi import FastAPI, HTTPException, Query
@@ -101,8 +102,36 @@ def meta(files: ModelFiles) -> dict[str, Any]:
 
 @app.get("/api/config")
 def client_config() -> dict[str, Any]:
-    """Settings the map needs. The Esri key is meant for browsers (restrict it by referrer)."""
-    return {"esri_api_key": config.ESRI_API_KEY}
+    """Settings the map needs."""
+    return {"imagery": config.ESRI_API_KEY is not None}
+
+
+_esri_client: httpx.AsyncClient | None = None
+
+
+@app.get("/api/imagery/{z}/{x}/{y}.jpg")
+async def imagery(z: int, x: int, y: int) -> Response:
+    """Aerial photo tile from Esri World Imagery, fetched here so the API key stays secret."""
+    global _esri_client
+    if config.ESRI_API_KEY is None:
+        raise HTTPException(404, "Flyfoto er ikke satt opp (ESRI_API_KEY)")
+    if not (0 <= z <= 23 and 0 <= x < 2**z and 0 <= y < 2**z):
+        raise HTTPException(404, "Ugyldig flis")
+    if _esri_client is None:
+        headers = {"Referer": config.ESRI_REFERER} if config.ESRI_REFERER else {}
+        _esri_client = httpx.AsyncClient(timeout=20, headers=headers)
+    res = await _esri_client.get(
+        config.ESRI_IMAGERY_URL.format(z=z, x=x, y=y), params={"token": config.ESRI_API_KEY}
+    )
+    if res.status_code == 404:
+        return Response(status_code=204)
+    if res.status_code != 200 or not res.headers.get("content-type", "").startswith("image/"):
+        raise HTTPException(502, f"Esri svarte {res.status_code}")
+    return Response(
+        res.content,
+        media_type=res.headers["content-type"],
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/api/species")

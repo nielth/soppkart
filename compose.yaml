@@ -8,7 +8,8 @@
 #   CDSE_S3_ACCESS_KEY  Copernicus Data Space keys, only needed to rebuild the
 #   CDSE_S3_SECRET_KEY  data from scratch (soppkart all)
 #   ESRI_API_KEY        ArcGIS Location Platform key for the aerial photo background
-#                       (optional; without it only the topo map is offered)
+#                       (optional; used by the backend only, never sent to browsers)
+#   ESRI_REFERER        your site's address, if the key is restricted by referrer
 services:
   backend:
     build: ./backend
@@ -20,6 +21,7 @@ services:
       CDSE_S3_ACCESS_KEY: ${CDSE_S3_ACCESS_KEY:-}
       CDSE_S3_SECRET_KEY: ${CDSE_S3_SECRET_KEY:-}
       ESRI_API_KEY: ${ESRI_API_KEY:-}
+      ESRI_REFERER: ${ESRI_REFERER:-}
     networks:
       default:
         # Unique name: the frontend is also on public-caddy, where other stacks

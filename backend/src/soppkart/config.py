@@ -12,8 +12,14 @@ MODEL_DIR = DATA_DIR / "model"
 CRS = "EPSG:25833"
 
 # ArcGIS Location Platform API key for the aerial photo background (Esri World
-# Imagery). Optional: without it the map only offers Kartverket's topo map.
+# Imagery). Optional: without it the map only offers Kartverket's topo map. The
+# backend fetches the tiles itself, so the key never reaches the browser.
 ESRI_API_KEY = os.environ.get("ESRI_API_KEY") or None
+# Sent as Referer to Esri, for keys restricted to a site (e.g. https://soppkart.nielth.com).
+ESRI_REFERER = os.environ.get("ESRI_REFERER") or None
+ESRI_IMAGERY_URL = (
+    "https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+)
 
 # Grid cell size in metres. Must be a multiple of 16 so SR16 (16 m) pixels
 # aggregate exactly into grid cells.
