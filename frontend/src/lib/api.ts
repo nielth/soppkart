@@ -207,9 +207,15 @@ export const STRAVA_ACTIVITIES = [
   { key: 'water', label: 'Vann (padling)' },
 ]
 
-/** Strava heatmap tiles, fetched through our backend with your Strava login. */
+/**
+ * Strava heatmap tiles, fetched through our backend with your Strava login.
+ * Bump STRAVA_TILES_VERSION when tile handling changes, so browsers don't keep
+ * showing old cached tiles.
+ */
+const STRAVA_TILES_VERSION = 2
+
 export function stravaTilesUrl(activity: string): string {
-  return `${location.origin}/api/strava/${activity}/{z}/{x}/{y}.png`
+  return `${location.origin}/api/strava/${activity}/{z}/{x}/{y}.png?v=${STRAVA_TILES_VERSION}`
 }
 
 export interface TrailRoute {
