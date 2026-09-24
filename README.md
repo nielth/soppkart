@@ -52,8 +52,8 @@ whatever the resolution.
 ## Using the map
 
 - **Species:** pick kantarell or spiss fleinsopp at the top of the panel.
-- **Vis topp X %:** the slider decides how much of the species' habitat is coloured. At 10 % only
-  the best tenth is shown, and the colour scale stretches over that part.
+- **Vis topp X %:** the slider decides how much of the species' habitat is coloured (default 5 %).
+  At 10 % only the best tenth is shown, and the colour scale stretches over that part.
 - **Tap the map** for the score and all feature values of that square.
 - **Your own finds:** "📍 Registrer funn her" saves your GPS position (only positions accurate to
   50 m are used for training), or tap a spot and choose "Jeg fant … her". Your finds are green

@@ -27,7 +27,9 @@
   let marker: maplibregl.Marker | undefined
 
   const SPECIES_STORAGE_KEY = 'soppkart.species'
-  const TOP_PCT_STORAGE_KEY = 'soppkart.topPct'
+  // New key when the default changes, so it applies once to everyone.
+  const TOP_PCT_STORAGE_KEY = 'soppkart.topPct.v2'
+  const DEFAULT_TOP_PCT = 5
 
   let speciesList = $state<Species[]>([])
   let species = $state(loadSpecies())
@@ -302,9 +304,9 @@
 
   function loadTopPct(): number {
     try {
-      return Number(localStorage.getItem(TOP_PCT_STORAGE_KEY)) || 70
+      return Number(localStorage.getItem(TOP_PCT_STORAGE_KEY)) || DEFAULT_TOP_PCT
     } catch {
-      return 70
+      return DEFAULT_TOP_PCT
     }
   }
 

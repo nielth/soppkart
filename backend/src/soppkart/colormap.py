@@ -14,7 +14,8 @@ RAMP = [
     (1.0, "#bd0026"),
 ]
 ALPHA = 220
-DEFAULT_THRESHOLD = 0.3
+# Show the best 5 % by default.
+DEFAULT_THRESHOLD = 0.95
 
 
 def _hex(color: str) -> tuple[int, int, int]:
