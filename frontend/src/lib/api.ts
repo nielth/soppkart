@@ -178,28 +178,22 @@ export function stravaHeatmapUrl(lat: number, lon: number, zoom: number): string
 }
 
 /**
- * The Strava app's map (strava://). Strava has no documented link to a position in
- * the app, and its heatmap page isn't a universal link, so iOS always opens that in Safari.
+ * Opens the Strava app. Strava has no documented link to a position or to its map
+ * tab, and its heatmap page isn't a universal link (iOS would open it in Safari).
  */
-export const STRAVA_APP_MAP_URL = 'strava://maps'
+export const STRAVA_APP_URL = 'strava://'
 
 /** True on phones and tablets, where app links like strava:// work. */
 export const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
 
 /**
- * Open Strava at a spot: on phones try the app first and fall back to the heatmap page
- * in the browser if the app didn't open; elsewhere open the heatmap page directly.
+ * Open Strava: on phones only the app (it can't be sent to a position or to its map tab,
+ * so it opens on its start screen); elsewhere the heatmap page at the spot.
  */
 export function openStrava(lat: number, lon: number, zoom: number): void {
-  const heatmap = stravaHeatmapUrl(lat, lon, zoom)
-  if (!IS_MOBILE) {
-    window.open(heatmap, '_blank', 'noopener')
+  if (IS_MOBILE) {
+    window.location.href = STRAVA_APP_URL
     return
   }
-  const fallback = setTimeout(() => {
-    // Still here and visible: the app didn't take over.
-    if (!document.hidden) window.location.href = heatmap
-  }, 1500)
-  document.addEventListener('visibilitychange', () => clearTimeout(fallback), { once: true })
-  window.location.href = STRAVA_APP_MAP_URL
+  window.open(stravaHeatmapUrl(lat, lon, zoom), '_blank', 'noopener')
 }

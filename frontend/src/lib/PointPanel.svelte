@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { openStrava, type PointInfo, type Status } from './api'
+  import { IS_MOBILE, openStrava, type PointInfo, type Status } from './api'
 
   interface Props {
     point: PointInfo | null
@@ -89,7 +89,7 @@
         >
           Åpne i Google Maps ↗
         </a>
-        <button class="maps" onclick={() => openStrava(point!.lat, point!.lon, 15)}>Strava ↗</button>
+        <button class="maps" onclick={() => openStrava(point!.lat, point!.lon, 15)}>{IS_MOBILE ? 'Strava-app' : 'Strava ↗'}</button>
         <button
           class="register"
           disabled={registered}

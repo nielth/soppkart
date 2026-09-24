@@ -17,6 +17,7 @@
     fetchStatus,
     findingsUrl,
     IMAGERY_URL,
+    IS_MOBILE,
     openStrava,
     TRAILS_URL,
     myFindingsUrl,
@@ -666,7 +667,7 @@
       <label class="check">
         <input type="checkbox" bind:checked={showTrails} /> Vis turstier (Kartverket)
       </label>
-      <button class="action" onclick={openStravaHere}>Åpne Strava her ↗</button>
+      <button class="action" onclick={openStravaHere}>{IS_MOBILE ? 'Åpne Strava-appen' : 'Åpne Strava heatmap her ↗'}</button>
     </section>
 
     {#if groups.length}
