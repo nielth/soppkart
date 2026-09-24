@@ -172,3 +172,14 @@ export function imageryUrl(apiKey: string): string {
     `?token=${encodeURIComponent(apiKey)}`
   )
 }
+
+/** Kartverket's Turrutebasen (hiking, ski, cycle and other routes) as transparent WMS tiles. */
+export const TRAILS_URL =
+  'https://wms.geonorge.no/skwms1/wms.friluftsruter2?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
+  '&LAYERS=Fotrute,Skiloype,Sykkelrute,AnnenRute&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}' +
+  '&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true'
+
+/** Strava's global heatmap at a spot (opens strava.com, where you are logged in). */
+export function stravaHeatmapUrl(lat: number, lon: number, zoom: number): string {
+  return `https://www.strava.com/maps/global-heatmap?sport=All&style=standard#${zoom.toFixed(2)}/${lat.toFixed(5)}/${lon.toFixed(5)}`
+}

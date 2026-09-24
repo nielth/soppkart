@@ -59,6 +59,12 @@ whatever the resolution.
   doubles its say. The map and the tapped point update within a second.
 - **Tap the map** for the score, how much each factor group pulls it up or down at that spot, and
   all feature values of that square.
+- **Turstier / Strava:** "Vis turstier" draws Kartverket's Turrutebasen (footpaths, ski, cycle and
+  other routes) over the map; "Åpne Strava heatmap her" opens Strava's global heatmap at the same
+  spot (Strava's own tiles need a Strava login and can't be embedded).
+- **Kart / Flyfoto:** switch the background to aerial photos (Esri World Imagery) when
+  `ESRI_API_KEY` is set: an ArcGIS Location Platform API key with only the Basemaps privilege,
+  restricted to your site's address.
 - **Registrerte funn:** tick "Vis registrerte funn" to see the GBIF/Artsdatabanken findings the model
   learned from; tap a point for its details (year, precision, type) and a link to GBIF.
 - **Your own finds:** "📍 Registrer funn her" saves your GPS position (only positions accurate to
@@ -130,7 +136,7 @@ Checks: `uv run black src && uv run ruff check src && uv run mypy src` and `bun 
 
 ## Data licences
 
-SR16 © NIBIO (NLOD); N50 and DTM 10 © Kartverket (CC BY 4.0); Tettsteder © SSB (CC BY 4.0); Corine Land Cover 2012 © NIBIO (NLOD). Copernicus Land Monitoring Service HRL Crop Types and Grassland Mowing Events © European Union (free, full and open). NGU løsmasser contains data under the
+SR16 © NIBIO (NLOD); N50 and DTM 10 © Kartverket (CC BY 4.0); Tettsteder © SSB (CC BY 4.0); Turrutebasen © Kartverket (CC BY 4.0); Corine Land Cover 2012 © NIBIO (NLOD). Copernicus Land Monitoring Service HRL Crop Types and Grassland Mowing Events © European Union (free, full and open). NGU løsmasser contains data under the
 Norwegian licence for public data (NLOD) made available by Norges geologiske undersøkelse (NGU).
 WorldClim (CC BY 4.0). Occurrence data via GBIF.org. Base map
 © Kartverket.

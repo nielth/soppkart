@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { PointInfo, Status } from './api'
+  import { stravaHeatmapUrl, type PointInfo, type Status } from './api'
 
   interface Props {
     point: PointInfo | null
@@ -88,6 +88,9 @@
           rel="noopener"
         >
           Åpne i Google Maps ↗
+        </a>
+        <a class="maps" href={stravaHeatmapUrl(point.lat, point.lon, 15)} target="_blank" rel="noopener">
+          Strava ↗
         </a>
         <button
           class="register"

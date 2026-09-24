@@ -17,6 +17,8 @@
     fetchStatus,
     findingsUrl,
     imageryUrl,
+    stravaHeatmapUrl,
+    TRAILS_URL,
     myFindingsUrl,
     startRetrain,
     tilesUrl,
@@ -45,6 +47,7 @@
   let opacity = $state(0.65)
   let showHeatmap = $state(true)
   let showFindings = $state(false)
+  let showTrails = $state(false)
   let point = $state<PointInfo | null>(null)
   let pointLoading = $state(false)
   let pointError = $state<string | null>(null)
@@ -124,6 +127,15 @@
         source: 'score',
         paint: { 'raster-opacity': opacity, 'raster-resampling': 'nearest' },
       })
+
+      map!.addSource('trails', {
+        type: 'raster',
+        tiles: [TRAILS_URL],
+        tileSize: 256,
+        minzoom: 8,
+        attribution: 'Turruter © <a href="https://www.kartverket.no/">Kartverket</a>',
+      })
+      map!.addLayer({ id: 'trails', type: 'raster', source: 'trails', layout: { visibility: 'none' } })
 
       map!.addSource('findings', {
         type: 'geojson',
@@ -470,6 +482,12 @@
     }
   }
 
+  function openStrava() {
+    if (!map) return
+    const { lat, lng } = map.getCenter()
+    window.open(stravaHeatmapUrl(lat, lng, Math.max(map.getZoom(), 12)), '_blank', 'noopener')
+  }
+
   function loadWeights(): Record<string, number> {
     try {
       return JSON.parse(localStorage.getItem(WEIGHTS_STORAGE_KEY) ?? '{}') as Record<string, number>
@@ -521,6 +539,12 @@
     saveBasemap(basemap)
     if (!mapLoaded || !map || !map.getLayer('imagery')) return
     map.setLayoutProperty('imagery', 'visibility', showImagery ? 'visible' : 'none')
+  })
+
+  $effect(() => {
+    const visibility = showTrails ? 'visible' : 'none'
+    if (!mapLoaded || !map) return
+    map.setLayoutProperty('trails', 'visibility', visibility)
   })
 
   $effect(() => {
@@ -639,6 +663,10 @@
       <label class="check">
         <input type="checkbox" bind:checked={showFindings} /> Vis registrerte funn (Artsdatabanken)
       </label>
+      <label class="check">
+        <input type="checkbox" bind:checked={showTrails} /> Vis turstier (Kartverket)
+      </label>
+      <button class="action" onclick={openStrava}>Åpne Strava heatmap her ↗</button>
     </section>
 
     {#if groups.length}
