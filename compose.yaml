@@ -18,7 +18,11 @@ services:
       CDSE_S3_ACCESS_KEY: ${CDSE_S3_ACCESS_KEY:-}
       CDSE_S3_SECRET_KEY: ${CDSE_S3_SECRET_KEY:-}
     networks:
-      - default
+      default:
+        # Unique name: the frontend is also on public-caddy, where other stacks
+        # may have a service called "backend".
+        aliases:
+          - soppkart-backend
     restart: unless-stopped
 
   # Serves the app and proxies /api to the backend over the internal network.
