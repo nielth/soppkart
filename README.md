@@ -3,35 +3,49 @@
 A map of Norway that shows your position and colours the terrain by how
 promising it is for a chosen mushroom species: **kantarell** (chanterelle) or **spiss fleinsopp**
 (*Psilocybe semilanceata*). Choose the species in the map panel. The frontend is Svelte with MapLibre, and
-the backend is Python with FastAPI and XGBoost. Both run in Docker Compose, with Caddy
-serving the site on `http://localhost`.
+the backend is Python with FastAPI and XGBoost. Both run in Docker Compose behind
+your own reverse proxy.
 
 ## Quick start
 
 Crop and mowing data comes from the Copernicus Data Space Ecosystem, which needs free S3 keys:
-create an account at <https://dataspace.copernicus.eu>, generate keys at
-<https://eodata-s3keysmanager.dataspace.copernicus.eu> and put them in `.env` (not committed):
+create an account at <https://dataspace.copernicus.eu> and generate keys at
+<https://eodata-s3keysmanager.dataspace.copernicus.eu>.
+
+The site is meant to sit behind an existing Caddy (or other reverse proxy) on the external
+Docker network `public-caddy`. The stack publishes no host ports; point your proxy at
+`http://soppkart:80`, for example:
 
 ```
-CDSE_S3_ACCESS_KEY=...
-CDSE_S3_SECRET_KEY=...
+soppkart.example.no {
+	reverse_proxy soppkart:80
+}
 ```
 
 ```bash
-# 1. Download source data, build features and train the model (first run: ~15 GB download, ~1 h)
-docker compose run --rm backend soppkart all
-
-# 2. Start the site
-docker compose up -d --build
+docker network create public-caddy        # once, if it doesn't exist yet
+docker compose up -d --build              # start the site
+docker compose run --rm backend soppkart all   # first run: download data, build features, train (~15 GB, ~1 h)
 ```
 
-Open <http://localhost>. The site is served over plain HTTP. Browsers still allow location access
-on `http://localhost`, but not on other plain-HTTP addresses. To use the site from a phone, put
-it behind a reverse proxy with HTTPS, or set `SITE_ADDRESS=your.domain.no` and publish port 443;
-Caddy then fetches a Let's Encrypt certificate automatically.
+Settings go in `.env` (or the stack's Environment in Komodo):
+
+| Variable | Meaning |
+| --- | --- |
+| `SOPPKART_DATA` | Host folder for features, models, findings and your own finds (default `./data`) |
+| `CDSE_S3_ACCESS_KEY`, `CDSE_S3_SECRET_KEY` | Copernicus keys, only needed when rebuilding data from scratch |
+
+The raw downloads (~21 GB) live in the named volume `raw`; they are only needed to rebuild the
+features. Everything the running site needs is in `SOPPKART_DATA`: `features/`, `model/`,
+`findings/` (GBIF findings, used when retraining) and `user/` (your own finds). To move the site
+to another server, copy that folder and start the stack there.
+
+**Komodo:** create a Stack from this repo with `compose.yaml`, set `SOPPKART_DATA` (e.g.
+`/mnt/sde/soppkart/data`) in its Environment, and deploy. Browsers only allow location access on
+HTTPS (or `localhost`), so use the site through your HTTPS proxy on a phone.
 
 The pipeline steps can also be run separately: `soppkart fetch`, `soppkart features`,
-`soppkart train`. Downloads are cached in `./data/raw`, so re-running is cheap. Norway is processed
+`soppkart train`. Downloads are cached in the `raw` volume, so re-running is cheap. Norway is processed
 in ~33 km chunks in parallel (`SOPPKART_WORKERS`, default 6), so memory use stays around 3–5 GB
 whatever the resolution.
 

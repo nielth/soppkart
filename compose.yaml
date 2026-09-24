@@ -1,28 +1,40 @@
+# Works with plain `docker compose up -d --build` and as a Komodo stack.
+# The site is reached through an existing Caddy on the external `public-caddy`
+# network: point it at http://soppkart:80. No host ports are published.
+#
+# Settings come from .env (or the stack's Environment in Komodo):
+#   SOPPKART_DATA       host folder with features, models, findings and your own
+#                       finds (default ./data next to this file)
+#   CDSE_S3_ACCESS_KEY  Copernicus Data Space keys, only needed to rebuild the
+#   CDSE_S3_SECRET_KEY  data from scratch (soppkart all)
 services:
   backend:
     build: ./backend
     volumes:
-      - ./data:/data
+      - ${SOPPKART_DATA:-./data}:/data
+      # Raw downloads (~21 GB), only used to rebuild the features.
+      - raw:/data/raw
     environment:
-      # Copernicus Data Space S3 keys, read from .env (not committed).
       CDSE_S3_ACCESS_KEY: ${CDSE_S3_ACCESS_KEY:-}
       CDSE_S3_SECRET_KEY: ${CDSE_S3_SECRET_KEY:-}
+    networks:
+      - default
     restart: unless-stopped
 
+  # Serves the app and proxies /api to the backend over the internal network.
   frontend:
     build: ./frontend
-    ports:
-      # Host port for the site; set SOPPKART_PORT in .env if 80 is taken.
-      - "${SOPPKART_PORT:-80}:80"
-    environment:
-      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
-    volumes:
-      - caddy_data:/data
-      - caddy_config:/config
+    container_name: soppkart
+    networks:
+      - default
+      - public-caddy
     depends_on:
       - backend
     restart: unless-stopped
 
+networks:
+  public-caddy:
+    external: true
+
 volumes:
-  caddy_data:
-  caddy_config:
+  raw:

@@ -29,7 +29,9 @@ CLC_PATH = config.RAW_DIR / "clc2012.gpkg"
 HRL_DIR = config.RAW_DIR / "hrl"
 LOSMASSER_DIR = config.RAW_DIR / "losmasser"
 PREC_DIR = config.RAW_DIR / "worldclim"
-FINDINGS_DIR = config.RAW_DIR / "findings"
+# Findings are training data, not raw downloads: kept outside RAW_DIR, which
+# can be a separate volume that only matters when rebuilding features.
+FINDINGS_DIR = config.DATA_DIR / "findings"
 
 
 def fetch_sr16() -> Path:

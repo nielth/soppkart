@@ -1,7 +1,6 @@
-# Plain HTTP on port 80. Browsers still allow location access on
-# http://localhost. To serve HTTPS later, set SITE_ADDRESS to a domain and
-# Caddy fetches a Let's Encrypt certificate (and publish port 443).
-{$SITE_ADDRESS::80} {
+# Plain HTTP on port 80 inside the stack. HTTPS and the domain are handled by
+# the Caddy in front of it (on the public-caddy network).
+:80 {
 	encode zstd gzip
 
 	handle /api/* {
