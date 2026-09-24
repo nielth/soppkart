@@ -162,10 +162,13 @@ export function fetchConfig(): Promise<ClientConfig> {
   return getJson<ClientConfig>('/api/config')
 }
 
-/** Esri World Imagery tiles (needs an ArcGIS Location Platform API key). */
+/**
+ * Esri World Imagery image tiles (needs an ArcGIS Location Platform API key with the
+ * Basemaps privilege). The static basemap tiles service has no plain imagery style.
+ */
 export function imageryUrl(apiKey: string): string {
   return (
-    'https://static-map-tiles-api.arcgis.com/arcgis/rest/services/static-basemap-tiles-service/v1/' +
-    `arcgis/imagery/static/tile/{z}/{y}/{x}?token=${encodeURIComponent(apiKey)}`
+    'https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}' +
+    `?token=${encodeURIComponent(apiKey)}`
   )
 }

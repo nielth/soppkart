@@ -439,7 +439,8 @@
       tiles: [imageryUrl(apiKey)],
       tileSize: 256,
       maxzoom: 19,
-      attribution: 'Powered by <a href="https://www.esri.com">Esri</a> | Esri, Maxar, Earthstar Geographics',
+      attribution:
+        'Powered by <a href="https://www.esri.com">Esri</a> | Esri, Vantor, GeoEye, Earthstar Geographics, CNES/Airbus DS, USDA, USGS, AeroGRID, IGN',
     })
     const above = map!.getStyle().layers.find((l) => l.id !== 'topo')?.id
     map!.addLayer(
