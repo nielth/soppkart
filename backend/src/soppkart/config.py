@@ -17,6 +17,10 @@ CRS = "EPSG:25833"
 ESRI_API_KEY = os.environ.get("ESRI_API_KEY") or None
 # Sent as Referer to Esri, for keys restricted to a site (e.g. https://soppkart.nielth.com).
 ESRI_REFERER = os.environ.get("ESRI_REFERER") or None
+# Your Strava login (the _strava4_session cookie from strava.com) for the Strava
+# heatmap layer. Optional; the backend renews the 24 h heatmap access itself.
+STRAVA_SESSION = os.environ.get("STRAVA_SESSION") or None
+
 # Redis for caching aerial photo tiles (optional; without it every tile goes to Esri).
 REDIS_URL = os.environ.get("REDIS_URL") or None
 # Used when Esri doesn't say how long a tile may be cached (it normally says 24 h).

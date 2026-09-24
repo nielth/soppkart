@@ -35,6 +35,7 @@ Settings go in `.env` (or the stack's Environment in Komodo):
 | `SOPPKART_DATA` | Host folder for features, models, findings and your own finds (default `./data`) |
 | `CDSE_S3_ACCESS_KEY`, `CDSE_S3_SECRET_KEY` | Copernicus keys, only needed when rebuilding data from scratch |
 | `ESRI_API_KEY`, `ESRI_REFERER` | Optional: aerial photo background (see Using the map) |
+| `STRAVA_SESSION` | Optional: your `_strava4_session` cookie for the Strava heatmap layer |
 
 The raw downloads (~21 GB) live in the named volume `raw`; they are only needed to rebuild the
 features. Everything the running site needs is in `SOPPKART_DATA`: `features/`, `model/`,
@@ -61,8 +62,11 @@ whatever the resolution.
 - **Tap the map** for the score, how much each factor group pulls it up or down at that spot, and
   all feature values of that square.
 - **Turstier / Strava:** "Vis turstier" draws Kartverket's Turrutebasen (footpaths, ski, cycle and
-  other routes) over the map; "Åpne Strava heatmap her" opens Strava's global heatmap at the same
-  spot (Strava's own tiles need a Strava login and can't be embedded).
+  other routes) over the map. "Vis Strava heatmap" draws Strava's global heatmap (on foot, all,
+  cycling, winter or water) when `STRAVA_SESSION` is set to your `_strava4_session` cookie from
+  strava.com: the backend fetches the tiles with your login, renews Strava's 24 h heatmap access
+  itself and caches tiles in Redis for as long as Strava allows (7 days). Only use this on a
+  site that only you can reach.
 - **Kart / Flyfoto:** switch the background to aerial photos (Esri World Imagery) when
   `ESRI_API_KEY` is set: an ArcGIS Location Platform API key with only the Basemaps privilege.
   The backend fetches the tiles (`/api/imagery/...`), so the key never reaches the browser. If the

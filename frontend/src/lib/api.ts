@@ -157,6 +157,8 @@ export function formatFoundAt(foundAt: string): string {
 export interface ClientConfig {
   /** Whether the server has an Esri key and can serve aerial photos. */
   imagery: boolean
+  /** Whether the server has a Strava login and can serve the Strava heatmap. */
+  strava: boolean
 }
 
 export function fetchConfig(): Promise<ClientConfig> {
@@ -196,4 +198,18 @@ export function openStrava(lat: number, lon: number, zoom: number): void {
     return
   }
   window.open(stravaHeatmapUrl(lat, lon, zoom), '_blank', 'noopener')
+}
+
+/** Strava heatmap types (Strava's own names) with their labels in the map. */
+export const STRAVA_ACTIVITIES = [
+  { key: 'run', label: 'Til fots (gå, løp, fjelltur)' },
+  { key: 'all', label: 'Alle aktiviteter' },
+  { key: 'ride', label: 'Sykkel' },
+  { key: 'winter', label: 'Vinter (ski)' },
+  { key: 'water', label: 'Vann (padling)' },
+]
+
+/** Strava heatmap tiles, fetched through our backend with your Strava login. */
+export function stravaTilesUrl(activity: string): string {
+  return `${location.origin}/api/strava/${activity}/{z}/{x}/{y}.png`
 }

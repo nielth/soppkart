@@ -20,7 +20,7 @@ from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.io import Reader
 from rio_tiler.utils import render
 
-from soppkart import config, features, userfindings
+from soppkart import config, features, stravaheat, userfindings
 from soppkart.colormap import DEFAULT_THRESHOLD, colormap
 from soppkart.train import CONTRIB_NODATA, CONTRIB_SCALE, ModelFiles, model_files
 
@@ -105,7 +105,10 @@ def meta(files: ModelFiles) -> dict[str, Any]:
 @app.get("/api/config")
 def client_config() -> dict[str, Any]:
     """Settings the map needs."""
-    return {"imagery": config.ESRI_API_KEY is not None}
+    return {
+        "imagery": config.ESRI_API_KEY is not None,
+        "strava": config.STRAVA_SESSION is not None,
+    }
 
 
 _esri_client: httpx.AsyncClient | None = None
@@ -131,7 +134,7 @@ def redis_client() -> redis.Redis | None:
 
 
 def cache_seconds(res: httpx.Response) -> int:
-    """How long Esri allows a tile to be cached (its Cache-Control max-age)."""
+    """How long the source allows a tile to be cached (its Cache-Control max-age)."""
     match = re.search(r"max-age=(\d+)", res.headers.get("cache-control", ""))
     return int(match.group(1)) if match else config.IMAGERY_CACHE_DEFAULT_S
 
@@ -188,6 +191,34 @@ async def imagery(z: int, x: int, y: int) -> Response:
         res.content,
         media_type=res.headers["content-type"],
         headers=IMAGERY_HEADERS | {"X-Cache": "MISS"},
+    )
+
+
+@app.get("/api/strava/{activity}/{z}/{x}/{y}.png")
+async def strava_tile(activity: str, z: int, x: int, y: int) -> Response:
+    """Strava global heatmap tile, fetched with your Strava login and cached in Redis."""
+    heatmap = stravaheat.heatmap()
+    if heatmap is None:
+        raise HTTPException(404, "Strava heatmap er ikke satt opp (STRAVA_SESSION)")
+    if activity not in stravaheat.ACTIVITIES or not (
+        0 <= z <= 20 and 0 <= x < 2**z and 0 <= y < 2**z
+    ):
+        raise HTTPException(404, "Ugyldig flis")
+    key = f"strava:{activity}:{z}:{x}:{y}"
+    cached = await cache_get(key)
+    if cached is not None:
+        return Response(
+            cached, media_type="image/png", headers=IMAGERY_HEADERS | {"X-Cache": "HIT"}
+        )
+    try:
+        res = await heatmap.tile(activity, z, x, y)
+    except stravaheat.StravaAuthError as err:
+        raise HTTPException(503, str(err)) from None
+    if res.status_code != 200 or not res.headers.get("content-type", "").startswith("image/"):
+        raise HTTPException(502, f"Strava svarte {res.status_code}")
+    await cache_set(key, res.content, cache_seconds(res))
+    return Response(
+        res.content, media_type="image/png", headers=IMAGERY_HEADERS | {"X-Cache": "MISS"}
     )
 
 

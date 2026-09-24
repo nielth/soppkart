@@ -19,6 +19,8 @@
     IMAGERY_URL,
     IS_MOBILE,
     openStrava,
+    STRAVA_ACTIVITIES,
+    stravaTilesUrl,
     TRAILS_URL,
     myFindingsUrl,
     startRetrain,
@@ -49,6 +51,9 @@
   let showHeatmap = $state(true)
   let showFindings = $state(false)
   let showTrails = $state(false)
+  let showStravaHeat = $state(false)
+  let stravaActivity = $state('run')
+  let stravaAvailable = $state(false)
   let point = $state<PointInfo | null>(null)
   let pointLoading = $state(false)
   let pointError = $state<string | null>(null)
@@ -137,6 +142,22 @@
         attribution: 'Turruter © <a href="https://www.kartverket.no/">Kartverket</a>',
       })
       map!.addLayer({ id: 'trails', type: 'raster', source: 'trails', layout: { visibility: 'none' } })
+
+      // Strava heatmap (only requested once switched on).
+      map!.addSource('strava-heat', {
+        type: 'raster',
+        tiles: [stravaTilesUrl(stravaActivity)],
+        tileSize: 512,
+        maxzoom: 15,
+        attribution: 'Heatmap © <a href="https://www.strava.com/maps/global-heatmap">Strava</a>',
+      })
+      map!.addLayer({
+        id: 'strava-heat',
+        type: 'raster',
+        source: 'strava-heat',
+        layout: { visibility: 'none' },
+        paint: { 'raster-opacity': 0.8 },
+      })
 
       map!.addSource('findings', {
         type: 'geojson',
@@ -249,6 +270,7 @@
     fetchConfig()
       .then((c) => {
         imageryAvailable = c.imagery
+        stravaAvailable = c.strava
         if (imageryAvailable && map?.isStyleLoaded() && !map.getLayer('imagery')) addImagery()
       })
       .catch(() => (imageryAvailable = false))
@@ -549,6 +571,14 @@
   })
 
   $effect(() => {
+    const visibility = showStravaHeat && stravaAvailable ? 'visible' : 'none'
+    const url = stravaTilesUrl(stravaActivity)
+    if (!mapLoaded || !map) return
+    map.getSource<maplibregl.RasterTileSource>('strava-heat')?.setTiles([url])
+    map.setLayoutProperty('strava-heat', 'visibility', visibility)
+  })
+
+  $effect(() => {
     const visibility = showFindings ? 'visible' : 'none'
     if (!mapLoaded || !map) return
     for (const id of ['findings-clusters', 'findings-count', 'findings-points']) {
@@ -667,6 +697,18 @@
       <label class="check">
         <input type="checkbox" bind:checked={showTrails} /> Vis turstier (Kartverket)
       </label>
+      {#if stravaAvailable}
+        <label class="check">
+          <input type="checkbox" bind:checked={showStravaHeat} /> Vis Strava heatmap
+        </label>
+        {#if showStravaHeat}
+          <select class="select" bind:value={stravaActivity} aria-label="Type aktivitet">
+            {#each STRAVA_ACTIVITIES as a (a.key)}
+              <option value={a.key}>{a.label}</option>
+            {/each}
+          </select>
+        {/if}
+      {/if}
       <button class="action" onclick={openStravaHere}>{IS_MOBILE ? 'Åpne Strava-appen' : 'Åpne Strava heatmap her ↗'}</button>
     </section>
 
@@ -894,6 +936,15 @@
   .basemap button:disabled {
     color: var(--muted);
     cursor: default;
+  }
+
+  .select {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    padding: 6px 8px;
+    font-size: 13px;
   }
 
   .check {
