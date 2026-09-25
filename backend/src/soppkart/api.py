@@ -157,14 +157,7 @@ class Login(BaseModel):
     password: str = Field(min_length=1, max_length=200)
 
 
-@app.post("/api/auth/login")
-def login(body: Login, response: Response) -> dict[str, Any]:
-    if auth.is_locked_out(body.username):
-        raise HTTPException(429, "For mange feil forsøk. Prøv igjen om 15 minutter.")
-    result = auth.login(body.username, body.password)
-    if result is None:
-        raise HTTPException(401, "Feil brukernavn eller passord")
-    user, token = result
+def set_session_cookie(response: Response, token: str) -> None:
     response.set_cookie(
         auth.COOKIE_NAME,
         token,
@@ -173,6 +166,39 @@ def login(body: Login, response: Response) -> dict[str, Any]:
         samesite="lax",
         secure=config.COOKIE_SECURE,
     )
+
+
+@app.post("/api/auth/login")
+def login(body: Login, response: Response) -> dict[str, Any]:
+    if auth.is_locked_out(body.username):
+        raise HTTPException(429, "For mange feil forsøk. Prøv igjen om 15 minutter.")
+    result = auth.login(body.username, body.password)
+    if result is None:
+        raise HTTPException(401, "Feil brukernavn eller passord")
+    user, token = result
+    set_session_cookie(response, token)
+    return user.as_dict()
+
+
+class Registration(BaseModel):
+    username: str = Field(min_length=2, max_length=100, pattern=r"^[\w.@-]+$")
+    password: str = Field(min_length=8, max_length=200)
+
+
+@app.post("/api/auth/register")
+def register(body: Registration, response: Response) -> dict[str, Any]:
+    """Anyone can register as a regular user, without access to anything extra
+    until an admin grants it. Logs the new user in."""
+    if not auth.registration_allowed():
+        raise HTTPException(429, "For mange nye brukere akkurat nå. Prøv igjen senere.")
+    try:
+        auth.add_user(body.username, body.password, False, set())
+    except ValueError as err:
+        raise HTTPException(409, str(err)) from None
+    result = auth.login(body.username, body.password)
+    assert result is not None
+    user, token = result
+    set_session_cookie(response, token)
     return user.as_dict()
 
 
@@ -211,6 +237,7 @@ def admin_user_dict(user: User) -> dict[str, Any]:
         "username": user.username,
         "is_admin": user.is_admin,
         "permissions": sorted(user.permissions),
+        "created_at": user.created_at,
     }
 
 
@@ -685,8 +712,9 @@ def delete_my_finding(finding_id: int, user: LoggedIn) -> dict[str, bool]:
 
 @app.post("/api/{species}/retrain")
 def retrain(species: str, user: LoggedIn) -> dict[str, bool]:
-    """Retrain the species' model in the background, with everyone's own findings."""
+    """Retrain the species' model in the background, with trusted users' findings."""
     get_files(species, user)
+    require_permission(user, "training")
     if is_training(species):
         raise HTTPException(409, "Modellen trenes allerede")
     log_path = config.DATA_DIR / "user" / f"train_{species}.log"

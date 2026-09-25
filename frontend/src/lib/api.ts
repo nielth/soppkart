@@ -265,6 +265,11 @@ export function login(username: string, password: string): Promise<User> {
   return send<User>('/api/auth/login', 'POST', { username, password })
 }
 
+/** Create a regular user (no extra access until an admin grants it) and log in. */
+export function register(username: string, password: string): Promise<User> {
+  return send<User>('/api/auth/register', 'POST', { username, password })
+}
+
 export function logout(): Promise<unknown> {
   return send('/api/auth/logout', 'POST')
 }
@@ -279,6 +284,7 @@ export interface AdminUser {
   username: string
   is_admin: boolean
   permissions: string[]
+  created_at: string
 }
 
 export interface AdminUsers {

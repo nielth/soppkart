@@ -20,12 +20,19 @@ from soppkart import config
 DB_PATH = config.DATA_DIR / "user" / "users.sqlite"
 COOKIE_NAME = "soppkart_session"
 
-# What an admin can grant, with the label shown in the admin page.
+# What an admin can grant, with the label shown in the admin page. "training":
+# the user's findings are used in training and they may retrain, so people who
+# register themselves can't skew the model until an admin trusts them.
 PERMISSIONS = {
     "imagery": "Flyfoto",
     "strava": "Strava heatmap",
     **{s.key: s.name for s in config.SPECIES.values() if s.restricted},
+    "training": "Trening",
 }
+
+# Self-registrations allowed per hour (all visitors together), against sign-up spam.
+MAX_REGISTRATIONS_PER_HOUR = 20
+_registrations: list[float] = []
 
 # Failed logins per username, to slow down password guessing.
 MAX_FAILED_LOGINS = 5
@@ -39,6 +46,7 @@ class User:
     username: str
     is_admin: bool
     permissions: frozenset[str]
+    created_at: str
 
     def can(self, permission: str) -> bool:
         return self.is_admin or permission in self.permissions
@@ -100,6 +108,7 @@ def user_from_row(row: sqlite3.Row) -> User:
         username=row["username"],
         is_admin=bool(row["is_admin"]),
         permissions=frozenset(p for p in row["permissions"].split(",") if p in PERMISSIONS),
+        created_at=row["created_at"],
     )
 
 
@@ -110,7 +119,7 @@ def count_users() -> int:
 
 def list_users() -> list[User]:
     with connect() as conn:
-        rows = conn.execute("SELECT * FROM users ORDER BY username").fetchall()
+        rows = conn.execute("SELECT * FROM users ORDER BY created_at DESC, id DESC").fetchall()
     return [user_from_row(r) for r in rows]
 
 
@@ -122,6 +131,21 @@ def get_user(user_id: int) -> User | None:
 
 def usernames() -> dict[int, str]:
     return {u.id: u.username for u in list_users()}
+
+
+def trusted_user_ids() -> set[int]:
+    """Users whose findings are used in training."""
+    return {u.id for u in list_users() if u.can("training")}
+
+
+def registration_allowed() -> bool:
+    """Counts a self-registration; False when there have been too many this hour."""
+    now = time.time()
+    _registrations[:] = [t for t in _registrations if now - t < 3600]
+    if len(_registrations) >= MAX_REGISTRATIONS_PER_HOUR:
+        return False
+    _registrations.append(now)
+    return True
 
 
 def add_user(username: str, password: str, is_admin: bool, permissions: set[str]) -> User:

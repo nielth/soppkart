@@ -28,7 +28,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GroupKFold
 from xgboost import DMatrix, XGBClassifier
 
-from soppkart import config, sources, userfindings
+from soppkart import auth, config, sources, userfindings
 from soppkart.features import (
     FEATURE_GROUPS,
     FEATURE_KEYS,
@@ -99,7 +99,9 @@ def load_findings(grid: Grid, species: config.Species) -> pl.DataFrame:
         "basis",
         source=pl.lit("gbif"),
     )
-    own = userfindings.as_frame(species.key).with_columns(source=pl.lit("own"))
+    own = userfindings.as_frame(species.key, auth.trusted_user_ids()).with_columns(
+        source=pl.lit("own")
+    )
     df = pl.concat([gbif, own], how="diagonal_relaxed")
     to_grid = Transformer.from_crs("EPSG:4326", grid.crs, always_xy=True)
     x, y = to_grid.transform(df["lon"].to_numpy(), df["lat"].to_numpy())

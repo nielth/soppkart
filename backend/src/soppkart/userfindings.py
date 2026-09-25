@@ -1,8 +1,9 @@
 """Findings registered by users in the app, stored in SQLite.
 
-Each finding belongs to the user who registered it. All users' findings are
-used as training data together with the GBIF findings (see train.load_findings),
-weighted by config.OWN_FINDING_WEIGHT.
+Each finding belongs to the user who registered it. Findings by trusted users
+(admins and users with the "training" permission) are used as training data
+together with the GBIF findings (see train.load_findings), weighted by
+config.OWN_FINDING_WEIGHT.
 """
 
 import sqlite3
@@ -105,9 +106,9 @@ def claim_unowned(user_id: int) -> int:
     return cur.rowcount
 
 
-def as_frame(species: str) -> pl.DataFrame:
-    """All users' findings of the species, with the same columns as the GBIF findings."""
-    rows = list_for(species)
+def as_frame(species: str, user_ids: set[int]) -> pl.DataFrame:
+    """These users' findings of the species, with the same columns as the GBIF findings."""
+    rows = [r for r in list_for(species) if r["user_id"] in user_ids]
     return pl.DataFrame(
         {
             "lat": [r["lat"] for r in rows],

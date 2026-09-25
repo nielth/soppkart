@@ -38,18 +38,20 @@ Settings go in `.env` (or the stack's Environment in Komodo):
 | `STRAVA_SESSION` | Optional: your `_strava4_session` cookie for the Strava heatmap layer |
 | `SOPPKART_COOKIE_SECURE` | `true` when the site is served over HTTPS: the login cookie is then never sent over plain HTTP |
 
-**Logins:** visitors see the map for the open species. Flyfoto, the Strava heatmap, spiss
-fleinsopp and saving your own finds need a login. Create the first admin on the server
-(it asks for a password; findings saved before logins existed become this admin's):
+**Logins:** visitors ("Gjest" at the bottom of the menu) see the map for the open species.
+Anyone can register at `/registrer` (or log in at `/login`) and then save their own finds.
+Everything else needs an admin to grant it under **Brukere** (`/brukere`): Flyfoto, Strava heatmap,
+Spiss fleinsopp and **Trening** (the user's finds are used when the model is trained, and they may
+start training; without it, strangers who register can't skew the model). Admins have
+everything. Create the first admin on the server (it asks for a password; findings saved before
+logins existed become this admin's):
 
 ```bash
 docker compose exec backend soppkart adduser --username thomas --admin
 ```
 
-Then log in on the site (Konto in the panel) and add more users under **Brukere**: each user gets
-their own login and the layers an admin grants them (Flyfoto, Strava heatmap, Spiss fleinsopp).
-Admins have everything. Users are stored in `data/user/users.sqlite` (passwords hashed with
-scrypt; a session lasts 180 days, and a new password logs the user out everywhere).
+Users are stored in `data/user/users.sqlite` (passwords hashed with scrypt; a session lasts 180
+days, and a new password logs the user out everywhere). At most 20 people can register per hour.
 
 The raw downloads (~21 GB) live in the named volume `raw`; they are only needed to rebuild the
 features. Everything the running site needs is in `SOPPKART_DATA`: `features/`, `model/`,
@@ -96,8 +98,8 @@ whatever the resolution.
   accurate to 50 m are used for training), or tap a spot and choose "Jeg fant … her". Your finds
   are green dots; tap one to delete it. Each user sees only their own finds; admins can switch
   between "Mine" and "Alle brukere". "Tren modellen med mine funn" retrains that species in the
-  background (a few minutes) with every user's finds, each counting `SOPPKART_OWN_FINDING_WEIGHT`
-  (default 3) times as much as a GBIF finding. They are stored in `data/user/findings.sqlite`.
+  background (a few minutes) with the finds of every user with Trening access, each counting
+  `SOPPKART_OWN_FINDING_WEIGHT` (default 3) times as much as a GBIF finding. They are stored in `data/user/findings.sqlite`.
 
 ## How it works
 

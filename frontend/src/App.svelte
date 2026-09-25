@@ -12,6 +12,7 @@
     fetchConfig,
     fetchMe,
     fetchMyFindings,
+    logout,
     fetchPoint,
     fetchSpecies,
     fetchTrails,
@@ -34,29 +35,35 @@
     type Status,
     type User,
   } from './lib/api'
-  import AccountCard from './lib/AccountCard.svelte'
-  import AdminPanel from './lib/AdminPanel.svelte'
+  import AccountPage from './lib/AccountPage.svelte'
+  import AuthPage from './lib/AuthPage.svelte'
   import Legend from './lib/Legend.svelte'
+  import NavUser from './lib/NavUser.svelte'
+  import SidebarBridge from './lib/SidebarBridge.svelte'
+  import UsersPage from './lib/UsersPage.svelte'
+  import { navigate, router } from './lib/router.svelte'
   import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
-  import * as Card from '$lib/components/ui/card'
   import * as Collapsible from '$lib/components/ui/collapsible'
   import { Label } from '$lib/components/ui/label'
   import * as Select from '$lib/components/ui/select'
   import { Separator } from '$lib/components/ui/separator'
+  import * as Sidebar from '$lib/components/ui/sidebar'
   import { Slider } from '$lib/components/ui/slider'
   import { Switch } from '$lib/components/ui/switch'
   import * as ToggleGroup from '$lib/components/ui/toggle-group'
   import {
+    ChartColumn,
     ChevronDown,
     Crosshair,
     Layers,
+    LogIn,
     MapPin,
-    Menu,
     RotateCcw,
     SlidersHorizontal,
     Sparkles,
-    X,
+    Sprout,
+    Users,
   } from '@lucide/svelte'
   import PointPanel from './lib/PointPanel.svelte'
 
@@ -71,7 +78,8 @@
 
   // The logged-in user (null for visitors), which decides what the map may show.
   let user = $state<User | null>(null)
-  let showAdmin = $state(false)
+  // Whether this user's findings are used in training and they may retrain.
+  let canTrain = $derived(user?.permissions.includes('training') ?? false)
   // Admins can list everyone's findings instead of just their own.
   let findingsScope = $state<FindingsScope>('mine')
   let speciesList = $state<Species[]>([])
@@ -101,8 +109,8 @@
   let findingMessage = $state<string | null>(null)
   let myFindings = $state<MyFinding[]>([])
   let showMyList = $state(false)
-  // On phones the sidebar is a drawer over the map; on wider screens it is always shown.
-  let sidebarOpen = $state(false)
+  // The sidebar's state (a sheet on phones, collapsible on wider screens).
+  let sidebar = $state<ReturnType<typeof Sidebar.useSidebar>>()
   // Weight per feature group in percent (100 = the model's own weighting).
   let weightsPct = $state<Record<string, number>>(loadWeights())
   let groups = $derived(status?.model?.groups ?? [])
@@ -292,7 +300,19 @@
    * Who is logged in, and what they may see: extra layers, species and findings.
    * Run at start and after logging in or out.
    */
+  /** Back to the map after logging in, registering or out, with what this user may see. */
+  function afterLogin() {
+    navigate('/')
+    loadAccess()
+  }
+
+  async function doLogout() {
+    await logout().catch(() => {})
+    afterLogin()
+  }
+
   async function loadAccess() {
+    showMyList = false
     try {
       user = await fetchMe()
     } catch {
@@ -379,7 +399,9 @@
       findingMessage =
         accuracy !== null && accuracy > 50
           ? `Lagret, men GPS-nøyaktigheten er ${Math.round(accuracy)} m. Bare funn innen 50 m brukes i treningen.`
-          : 'Funnet er lagret. Tren modellen på nytt for å bruke det.'
+          : canTrain
+            ? 'Funnet er lagret. Tren modellen på nytt for å bruke det.'
+            : 'Funnet er lagret.'
       refreshStatus(species)
     } catch (err) {
       findingMessage = `Kunne ikke lagre: ${err}`
@@ -436,7 +458,7 @@
   }
 
   function flyToFinding(f: MyFinding) {
-    sidebarOpen = false
+    sidebar?.setOpenMobile(false)
     map?.flyTo({ center: [f.lon, f.lat], zoom: Math.max(map.getZoom(), 16) })
   }
 
@@ -731,297 +753,306 @@
   }
 </script>
 
-<div class="flex h-full">
-  <aside
-    class="fixed inset-y-0 left-0 z-40 flex w-[min(340px,88vw)] -translate-x-full flex-col gap-3 overflow-y-auto border-r bg-background p-3 *:shrink-0 pt-[max(12px,env(safe-area-inset-top))] shadow-xl transition-transform duration-200 md:static md:w-[340px] md:translate-x-0 md:shadow-none"
-    class:translate-x-0={sidebarOpen}
-  >
-    <header class="flex items-center justify-between px-1">
-      <div class="flex items-center gap-2">
+<Sidebar.Provider class="h-svh min-h-0" style="--sidebar-width: 20rem">
+  <SidebarBridge bind:sidebar />
+  <Sidebar.Root>
+    <Sidebar.Header>
+      <div class="flex h-12 items-center gap-2 px-2 pt-[env(safe-area-inset-top)]">
         <span class="text-2xl">🍄</span>
-        <div>
-          <div class="text-lg leading-tight font-semibold">Soppkart</div>
-          <div class="text-xs text-muted-foreground">Finn de beste soppstedene</div>
+        <div class="grid leading-tight">
+          <span class="font-semibold">Soppkart</span>
+          <span class="text-xs text-muted-foreground">Finn de beste soppstedene</span>
         </div>
       </div>
-      <Button variant="ghost" size="icon" class="md:hidden" onclick={() => (sidebarOpen = false)} aria-label="Lukk meny">
-        <X />
-      </Button>
-    </header>
+    </Sidebar.Header>
 
-    {#if statusError}
-      <div class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-        Backend utilgjengelig: {statusError}
-      </div>
-    {:else if status && !status.ready}
-      <div class="rounded-md border bg-accent px-3 py-2 text-xs">{status.message}</div>
-    {/if}
-
-    <AccountCard {user} onchange={loadAccess} onadmin={() => ((showAdmin = true), (sidebarOpen = false))} />
-
-    <Card.Root class="gap-3 py-4">
-      <Card.Header class="px-4">
-        <Card.Title class="text-sm">Art</Card.Title>
-      </Card.Header>
-      <Card.Content class="grid grid-cols-2 gap-2 px-4">
-        {#each speciesList as s (s.key)}
-          <button
-            class="flex flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors hover:bg-accent {s.key === species
-              ? 'border-primary bg-accent ring-1 ring-primary'
-              : ''}"
-            aria-pressed={s.key === species}
-            onclick={() => (species = s.key)}
-          >
-            <span class="text-sm font-medium">{s.name}</span>
-            <span class="text-[11px] text-muted-foreground italic">{s.latin}</span>
-          </button>
-        {/each}
-      </Card.Content>
-    </Card.Root>
-
-    <Card.Root class="gap-3 py-4">
-      <Card.Header class="px-4">
-        <Card.Title class="flex items-center gap-2 text-sm"><Layers class="size-4" /> Kart</Card.Title>
-      </Card.Header>
-      <Card.Content class="flex flex-col gap-4 px-4">
-        <ToggleGroup.Root
-          type="single"
-          variant="outline"
-          class="w-full"
-          value={basemap}
-          onValueChange={(v) => v && (basemap = v as 'kart' | 'flyfoto')}
-        >
-          <ToggleGroup.Item value="kart" class="flex-1">Kart</ToggleGroup.Item>
-          <ToggleGroup.Item
-            value="flyfoto"
-            class="flex-1"
-            disabled={!imageryAvailable}
-            title={imageryAvailable ? 'Flyfoto (Esri World Imagery)' : 'Flyfoto krever ESRI_API_KEY på serveren'}
-          >
-            Flyfoto
-          </ToggleGroup.Item>
-        </ToggleGroup.Root>
-
-        <div class="flex items-center justify-between">
-          <Label for="show-heatmap">Vis sannsynlighet</Label>
-          <Switch id="show-heatmap" bind:checked={showHeatmap} />
+    <Sidebar.Content class="gap-0">
+      {#if statusError}
+        <div class="mx-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Backend utilgjengelig: {statusError}
         </div>
-        <div class="flex flex-col gap-2">
-          <div class="flex items-center justify-between text-sm">
-            <span>Vis topp</span>
-            <Badge variant="secondary">{topPct} %</Badge>
-          </div>
-          <Slider type="single" bind:value={topPct} min={1} max={100} step={1} disabled={!showHeatmap} />
-          <Legend {topPct} />
-        </div>
-        <div class="flex flex-col gap-2">
-          <div class="flex items-center justify-between text-sm">
-            <span>Gjennomsiktighet</span>
-            <span class="text-xs text-muted-foreground">{Math.round(opacity * 100)} %</span>
-          </div>
-          <Slider type="single" bind:value={opacity} min={0} max={1} step={0.05} disabled={!showHeatmap} />
-        </div>
+      {:else if status && !status.ready}
+        <div class="mx-2 rounded-md border bg-accent px-3 py-2 text-xs">{status.message}</div>
+      {/if}
 
-        <Separator />
-
-        <div class="flex items-center justify-between">
-          <Label for="show-findings">Registrerte funn (Artsdatabanken)</Label>
-          <Switch id="show-findings" bind:checked={showFindings} />
-        </div>
-        <div class="flex items-center justify-between">
-          <Label for="show-trails">Turstier (Kartverket, DNT)</Label>
-          <Switch id="show-trails" bind:checked={showTrails} />
-        </div>
-        {#if showTrails}
-          <div class="-mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-            <span class="flex items-center gap-1"><span class="h-1 w-4 rounded bg-[#7b1fa2]"></span> Fotrute</span>
-            <span class="flex items-center gap-1">
-              <span class="h-0 w-4 border-t-2 border-dashed border-[#0d47a1]"></span> Skiløype
-            </span>
-            <span class="flex items-center gap-1"><span class="h-1 w-4 rounded bg-[#2e7d32]"></span> Sykkel</span>
-            <span class="flex items-center gap-1"><span class="h-0.5 w-4 rounded bg-[#616161]"></span> Annet</span>
-          </div>
-        {/if}
-        {#if stravaAvailable}
-          <div class="flex items-center justify-between">
-            <Label for="show-strava">Strava heatmap</Label>
-            <Switch id="show-strava" bind:checked={showStravaHeat} />
-          </div>
-          {#if showStravaHeat}
-            <Select.Root type="single" bind:value={stravaActivity}>
-              <Select.Trigger class="w-full">
-                {STRAVA_ACTIVITIES.find((a) => a.key === stravaActivity)?.label}
-              </Select.Trigger>
-              <Select.Content>
-                {#each STRAVA_ACTIVITIES as a (a.key)}
-                  <Select.Item value={a.key} label={a.label}>{a.label}</Select.Item>
-                {/each}
-              </Select.Content>
-            </Select.Root>
-          {/if}
-        {/if}
-      </Card.Content>
-    </Card.Root>
-
-    {#if groups.length}
-      <Collapsible.Root>
-        <Card.Root class="gap-3 py-4">
-          <Card.Header class="px-4">
-            <Collapsible.Trigger class="flex w-full items-center justify-between">
-              <Card.Title class="flex items-center gap-2 text-sm">
-                <SlidersHorizontal class="size-4" /> Vekting
-                {#if wParam}<Badge>tilpasset</Badge>{/if}
-              </Card.Title>
-              <ChevronDown class="size-4 text-muted-foreground" />
-            </Collapsible.Trigger>
-          </Card.Header>
-          <Collapsible.Content>
-            <Card.Content class="flex flex-col gap-4 px-4">
-              <p class="text-xs text-muted-foreground">
-                Hvor mye hver faktor teller. 100 % = modellens egen vekting, 0 % = se bort fra faktoren.
-              </p>
-              {#each groups as g (g.key)}
-                <div class="flex flex-col gap-2">
-                  <div class="flex items-baseline justify-between text-sm">
-                    <span>{g.label}</span>
-                    <span class="font-medium tabular-nums">{weightsPct[g.key] ?? 100} %</span>
-                  </div>
-                  <Slider
-                    type="single"
-                    value={weightsPct[g.key] ?? 100}
-                    onValueChange={(v) => (weightsPct[g.key] = v)}
-                    min={0}
-                    max={200}
-                    step={10}
-                    disabled={!showHeatmap}
-                  />
-                  <span class="text-[11px] text-muted-foreground">
-                    Betydning i modellen: {Math.round(g.importance * 100)} %
+      <Sidebar.Group>
+        <Sidebar.GroupLabel class="gap-2"><Sprout /> Art</Sidebar.GroupLabel>
+        <Sidebar.GroupContent>
+          <Sidebar.Menu>
+            {#each speciesList as s (s.key)}
+              <Sidebar.MenuItem>
+                <Sidebar.MenuButton size="lg" isActive={s.key === species} onclick={() => (species = s.key)}>
+                  <span
+                    class="size-2 shrink-0 rounded-full {s.key === species ? 'bg-primary' : 'bg-sidebar-border'}"
+                  ></span>
+                  <span class="grid leading-tight">
+                    <span class="truncate">{s.name}</span>
+                    <span class="truncate text-[11px] font-normal text-muted-foreground italic">{s.latin}</span>
                   </span>
-                </div>
-              {/each}
-              <Button variant="outline" size="sm" onclick={resetWeights} disabled={!wParam}>
-                <RotateCcw /> Tilbakestill vekting
-              </Button>
-            </Card.Content>
-          </Collapsible.Content>
-        </Card.Root>
-      </Collapsible.Root>
-    {/if}
+                </Sidebar.MenuButton>
+              </Sidebar.MenuItem>
+            {/each}
+          </Sidebar.Menu>
+        </Sidebar.GroupContent>
+      </Sidebar.Group>
 
-    <Card.Root class="gap-3 py-4">
-      <Card.Header class="px-4">
-        <Card.Title class="flex items-center gap-2 text-sm"><MapPin class="size-4" /> Mine funn</Card.Title>
-      </Card.Header>
-      <Card.Content class="flex flex-col gap-3 px-4">
-        {#if !user}
-          <p class="text-xs text-muted-foreground">Logg inn for å registrere og se dine egne funn.</p>
-        {:else}
-        {#if user.is_admin}
+      <Sidebar.Group>
+        <Sidebar.GroupLabel class="gap-2"><Layers /> Kart</Sidebar.GroupLabel>
+        <Sidebar.GroupContent class="flex flex-col gap-4 px-2 pt-1">
           <ToggleGroup.Root
             type="single"
             variant="outline"
-            size="sm"
             class="w-full"
-            value={findingsScope}
-            onValueChange={(v) => v && (findingsScope = v as FindingsScope)}
+            value={basemap}
+            onValueChange={(v) => v && (basemap = v as 'kart' | 'flyfoto')}
           >
-            <ToggleGroup.Item value="mine" class="flex-1">Mine</ToggleGroup.Item>
-            <ToggleGroup.Item value="all" class="flex-1">Alle brukere</ToggleGroup.Item>
+            <ToggleGroup.Item value="kart" class="flex-1">Kart</ToggleGroup.Item>
+            <ToggleGroup.Item
+              value="flyfoto"
+              class="flex-1"
+              disabled={!imageryAvailable}
+              title={imageryAvailable ? 'Flyfoto (Esri World Imagery)' : 'Flyfoto krever innlogging og tilgang'}
+            >
+              Flyfoto
+            </ToggleGroup.Item>
           </ToggleGroup.Root>
-        {/if}
-        <Button
-          class="bg-success text-white hover:bg-success/90"
-          disabled={!gps}
-          title={gps ? `GPS ±${Math.round(gps.accuracy)} m` : 'Venter på GPS-posisjon'}
-          onclick={() => gps && registerFinding(gps.lat, gps.lon, gps.accuracy)}
-        >
-          <Crosshair /> Registrer funn her
-        </Button>
-        <p class="text-xs text-muted-foreground">Eller trykk på kartet og velg «Jeg fant … her».</p>
-        {#if findingMessage}
-          <div class="rounded-md bg-accent px-3 py-2 text-xs">{findingMessage}</div>
-        {/if}
 
-        <Collapsible.Root bind:open={showMyList}>
-          <Collapsible.Trigger
-            class="flex w-full items-center justify-between text-sm font-medium disabled:opacity-60"
-            disabled={!myFindings.length}
-          >
-            <span>{myFindings.length} funn lagret</span>
-            {#if myFindings.length}<ChevronDown class="size-4 text-muted-foreground" />{/if}
-          </Collapsible.Trigger>
-          <Collapsible.Content>
-            <ul class="mt-2 flex max-h-56 flex-col divide-y overflow-y-auto rounded-md border text-xs">
-              {#each myFindings as f (f.id)}
-                <li class="flex items-center justify-between gap-2 px-2 py-1.5">
-                  <span>
-                    {#if f.username}<span class="font-medium">{f.username}</span>{/if}
-                    {formatFoundAt(f.found_at)}
-                    {#if f.accuracy_m !== null}<span class="text-muted-foreground">±{Math.round(f.accuracy_m)} m</span>{/if}
-                  </span>
-                  <span class="flex gap-1">
-                    <Button variant="outline" size="sm" class="h-7 px-2" onclick={() => flyToFinding(f)}>Vis</Button>
-                    <Button variant="ghost" size="sm" class="h-7 px-2 text-destructive" onclick={() => removeFinding(f.id)}>
-                      Slett
-                    </Button>
-                  </span>
-                </li>
-              {/each}
-            </ul>
-          </Collapsible.Content>
+          <div class="flex items-center justify-between">
+            <Label for="show-heatmap">Vis sannsynlighet</Label>
+            <Switch id="show-heatmap" bind:checked={showHeatmap} />
+          </div>
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between text-sm">
+              <span>Vis topp</span>
+              <Badge variant="secondary">{topPct} %</Badge>
+            </div>
+            <Slider type="single" bind:value={topPct} min={1} max={100} step={1} disabled={!showHeatmap} />
+            <Legend {topPct} />
+          </div>
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between text-sm">
+              <span>Gjennomsiktighet</span>
+              <span class="text-xs text-muted-foreground">{Math.round(opacity * 100)} %</span>
+            </div>
+            <Slider type="single" bind:value={opacity} min={0} max={1} step={0.05} disabled={!showHeatmap} />
+          </div>
+
+          <Separator />
+
+          <div class="flex items-center justify-between gap-2">
+            <Label for="show-findings">Registrerte funn (Artsdatabanken)</Label>
+            <Switch id="show-findings" bind:checked={showFindings} />
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <Label for="show-trails">Turstier (Kartverket, DNT)</Label>
+            <Switch id="show-trails" bind:checked={showTrails} />
+          </div>
+          {#if showTrails}
+            <div class="-mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              <span class="flex items-center gap-1"><span class="h-1 w-4 rounded bg-[#7b1fa2]"></span> Fotrute</span>
+              <span class="flex items-center gap-1">
+                <span class="h-0 w-4 border-t-2 border-dashed border-[#0d47a1]"></span> Skiløype
+              </span>
+              <span class="flex items-center gap-1"><span class="h-1 w-4 rounded bg-[#2e7d32]"></span> Sykkel</span>
+              <span class="flex items-center gap-1"><span class="h-0.5 w-4 rounded bg-[#616161]"></span> Annet</span>
+            </div>
+          {/if}
+          {#if stravaAvailable}
+            <div class="flex items-center justify-between gap-2">
+              <Label for="show-strava">Strava heatmap</Label>
+              <Switch id="show-strava" bind:checked={showStravaHeat} />
+            </div>
+            {#if showStravaHeat}
+              <Select.Root type="single" bind:value={stravaActivity}>
+                <Select.Trigger class="w-full">
+                  {STRAVA_ACTIVITIES.find((a) => a.key === stravaActivity)?.label}
+                </Select.Trigger>
+                <Select.Content>
+                  {#each STRAVA_ACTIVITIES as a (a.key)}
+                    <Select.Item value={a.key} label={a.label}>{a.label}</Select.Item>
+                  {/each}
+                </Select.Content>
+              </Select.Root>
+            {/if}
+          {/if}
+        </Sidebar.GroupContent>
+      </Sidebar.Group>
+
+      {#if groups.length}
+        <Collapsible.Root class="group/collapsible">
+          <Sidebar.Group>
+            <Sidebar.GroupLabel class="gap-2">
+              {#snippet child({ props })}
+                <Collapsible.Trigger {...props}>
+                  <SlidersHorizontal /> Vekting
+                  {#if wParam}<Badge class="h-4 px-1.5 text-[10px]">tilpasset</Badge>{/if}
+                  <ChevronDown class="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                </Collapsible.Trigger>
+              {/snippet}
+            </Sidebar.GroupLabel>
+            <Collapsible.Content>
+              <Sidebar.GroupContent class="flex flex-col gap-4 px-2 pt-1">
+                <p class="text-xs text-muted-foreground">
+                  Hvor mye hver faktor teller. 100 % = modellens egen vekting, 0 % = se bort fra faktoren.
+                </p>
+                {#each groups as g (g.key)}
+                  <div class="flex flex-col gap-2">
+                    <div class="flex items-baseline justify-between text-sm">
+                      <span>{g.label}</span>
+                      <span class="font-medium tabular-nums">{weightsPct[g.key] ?? 100} %</span>
+                    </div>
+                    <Slider
+                      type="single"
+                      value={weightsPct[g.key] ?? 100}
+                      onValueChange={(v) => (weightsPct[g.key] = v)}
+                      min={0}
+                      max={200}
+                      step={10}
+                      disabled={!showHeatmap}
+                    />
+                    <span class="text-[11px] text-muted-foreground">
+                      Betydning i modellen: {Math.round(g.importance * 100)} %
+                    </span>
+                  </div>
+                {/each}
+                <Button variant="outline" size="sm" onclick={resetWeights} disabled={!wParam}>
+                  <RotateCcw /> Tilbakestill vekting
+                </Button>
+              </Sidebar.GroupContent>
+            </Collapsible.Content>
+          </Sidebar.Group>
         </Collapsible.Root>
+      {/if}
 
-        {#if status?.training}
-          <div class="rounded-md bg-accent px-3 py-2 text-xs">Trener modellen… (noen minutter)</div>
-        {:else}
-          <Button variant="outline" disabled={!myFindings.length} onclick={retrain}>
-            <Sparkles /> Tren modellen med mine funn
-          </Button>
-        {/if}
-        {/if}
-      </Card.Content>
-    </Card.Root>
+      <Sidebar.Group>
+        <Sidebar.GroupLabel class="gap-2"><MapPin /> Mine funn</Sidebar.GroupLabel>
+        <Sidebar.GroupContent class="flex flex-col gap-3 px-2 pt-1">
+          {#if !user}
+            <p class="text-xs text-muted-foreground">Logg inn for å lagre og se dine egne funn.</p>
+            <Button variant="outline" size="sm" onclick={() => ((sidebar?.setOpenMobile(false)), navigate('/login'))}>
+              <LogIn /> Logg inn
+            </Button>
+          {:else}
+            {#if user.is_admin}
+              <ToggleGroup.Root
+                type="single"
+                variant="outline"
+                size="sm"
+                class="w-full"
+                value={findingsScope}
+                onValueChange={(v) => v && (findingsScope = v as FindingsScope)}
+              >
+                <ToggleGroup.Item value="mine" class="flex-1">Mine</ToggleGroup.Item>
+                <ToggleGroup.Item value="all" class="flex-1">Alle brukere</ToggleGroup.Item>
+              </ToggleGroup.Root>
+            {/if}
+            <Button
+              class="bg-success text-white hover:bg-success/90"
+              disabled={!gps}
+              title={gps ? `GPS ±${Math.round(gps.accuracy)} m` : 'Venter på GPS-posisjon'}
+              onclick={() => gps && registerFinding(gps.lat, gps.lon, gps.accuracy)}
+            >
+              <Crosshair /> Registrer funn her
+            </Button>
+            <p class="text-xs text-muted-foreground">Eller trykk på kartet og velg «Jeg fant … her».</p>
+            {#if findingMessage}
+              <div class="rounded-md bg-accent px-3 py-2 text-xs">{findingMessage}</div>
+            {/if}
 
-    {#if status?.model}
-      <div class="grid grid-cols-2 gap-x-3 gap-y-1 px-2 pb-2 text-[11px] text-muted-foreground">
-        <span>Treffsikkerhet (AUC)</span>
-        <span class="text-right text-foreground">{status.model.cv_auc?.toFixed(2) ?? '–'}</span>
-        <span>Funn i treningen</span>
-        <span class="text-right text-foreground">
-          {status.model.n_findings_used ?? status.model.n_findings}{#if status.model.n_own_findings_used}
-            ({status.model.n_own_findings_used} egne){/if}
-        </span>
-        {#if status.model.habitat}
-          <span>Habitat</span>
-          <span class="text-right text-foreground">{status.model.habitat}</span>
-        {/if}
-        <span>Trent</span>
-        <span class="text-right text-foreground">{formatFoundAt(status.model.trained_at)}</span>
-      </div>
-    {/if}
-  </aside>
+            <Collapsible.Root bind:open={showMyList}>
+              <Collapsible.Trigger
+                class="flex w-full items-center justify-between text-sm font-medium disabled:opacity-60"
+                disabled={!myFindings.length}
+              >
+                <span>{myFindings.length} funn lagret</span>
+                {#if myFindings.length}<ChevronDown class="size-4 text-muted-foreground" />{/if}
+              </Collapsible.Trigger>
+              <Collapsible.Content>
+                <ul class="mt-2 flex max-h-56 flex-col divide-y overflow-y-auto rounded-md border text-xs">
+                  {#each myFindings as f (f.id)}
+                    <li class="flex items-center justify-between gap-2 px-2 py-1.5">
+                      <span>
+                        {#if f.username}<span class="font-medium">{f.username}</span>{/if}
+                        {formatFoundAt(f.found_at)}
+                        {#if f.accuracy_m !== null}<span class="text-muted-foreground">±{Math.round(f.accuracy_m)} m</span>{/if}
+                      </span>
+                      <span class="flex gap-1">
+                        <Button variant="outline" size="sm" class="h-7 px-2" onclick={() => flyToFinding(f)}>Vis</Button>
+                        <Button variant="ghost" size="sm" class="h-7 px-2 text-destructive" onclick={() => removeFinding(f.id)}>
+                          Slett
+                        </Button>
+                      </span>
+                    </li>
+                  {/each}
+                </ul>
+              </Collapsible.Content>
+            </Collapsible.Root>
 
-  {#if sidebarOpen}
-    <button
-      class="fixed inset-0 z-30 bg-black/30 md:hidden"
-      onclick={() => (sidebarOpen = false)}
-      aria-label="Lukk meny"
-    ></button>
-  {/if}
+            {#if canTrain}
+              {#if status?.training}
+                <div class="rounded-md bg-accent px-3 py-2 text-xs">Trener modellen… (noen minutter)</div>
+              {:else}
+                <Button variant="outline" disabled={!myFindings.length} onclick={retrain}>
+                  <Sparkles /> Tren modellen med mine funn
+                </Button>
+              {/if}
+            {/if}
+          {/if}
+        </Sidebar.GroupContent>
+      </Sidebar.Group>
 
-  <main class="relative min-w-0 flex-1">
+      {#if user?.is_admin}
+        <Sidebar.Group>
+          <Sidebar.GroupLabel>Administrasjon</Sidebar.GroupLabel>
+          <Sidebar.GroupContent>
+            <Sidebar.Menu>
+              <Sidebar.MenuItem>
+                <Sidebar.MenuButton onclick={() => ((sidebar?.setOpenMobile(false)), navigate('/brukere'))}>
+                  <Users /> <span>Brukere</span>
+                </Sidebar.MenuButton>
+              </Sidebar.MenuItem>
+            </Sidebar.Menu>
+          </Sidebar.GroupContent>
+        </Sidebar.Group>
+      {/if}
+
+      {#if status?.model}
+        <Sidebar.Group>
+          <Sidebar.GroupLabel class="gap-2"><ChartColumn /> Modellen</Sidebar.GroupLabel>
+          <Sidebar.GroupContent class="grid grid-cols-2 gap-x-3 gap-y-1 px-2 text-[11px] text-muted-foreground">
+            <span>Treffsikkerhet (AUC)</span>
+            <span class="text-right text-foreground">{status.model.cv_auc?.toFixed(2) ?? '–'}</span>
+            <span>Funn i treningen</span>
+            <span class="text-right text-foreground">
+              {status.model.n_findings_used ?? status.model.n_findings}{#if status.model.n_own_findings_used}
+                ({status.model.n_own_findings_used} egne){/if}
+            </span>
+            {#if status.model.habitat}
+              <span>Habitat</span>
+              <span class="text-right text-foreground">{status.model.habitat}</span>
+            {/if}
+            <span>Trent</span>
+            <span class="text-right text-foreground">{formatFoundAt(status.model.trained_at)}</span>
+          </Sidebar.GroupContent>
+        </Sidebar.Group>
+      {/if}
+    </Sidebar.Content>
+
+    <Sidebar.Footer class="pb-[max(8px,env(safe-area-inset-bottom))]">
+      <NavUser {user} onlogout={doLogout} />
+    </Sidebar.Footer>
+    <Sidebar.Rail />
+  </Sidebar.Root>
+
+  <Sidebar.Inset class="min-w-0">
     <!-- h-full/w-full rather than absolute: MapLibre's own CSS sets position: relative. -->
     <div class="h-full w-full" bind:this={mapEl}></div>
-    <Button
+    <Sidebar.Trigger
       variant="secondary"
       size="icon"
-      class="absolute top-[max(12px,env(safe-area-inset-top))] left-3 z-10 size-11 shadow-lg md:hidden"
-      onclick={() => (sidebarOpen = true)}
-      aria-label="Åpne meny"
-    >
-      <Menu />
-    </Button>
+      class="absolute top-[max(12px,env(safe-area-inset-top))] left-3 z-10 size-10 shadow-lg"
+      aria-label="Meny"
+    />
     {#if point || pointLoading || pointError}
       <PointPanel
         {point}
@@ -1034,11 +1065,17 @@
         onregister={(lat, lon) => registerFinding(lat, lon, null)}
       />
     {/if}
-  </main>
-</div>
+  </Sidebar.Inset>
+</Sidebar.Provider>
 
-{#if showAdmin && user?.is_admin}
-  <AdminPanel me={user} onclose={() => (showAdmin = false)} />
+{#if router.path === '/login' || router.path === '/registrer'}
+  {#key router.path}
+    <AuthPage mode={router.path === '/login' ? 'login' : 'register'} ondone={afterLogin} />
+  {/key}
+{:else if router.path === '/konto' && user}
+  <AccountPage {user} onloggedout={afterLogin} />
+{:else if router.path === '/brukere' && user?.is_admin}
+  <UsersPage me={user} />
 {/if}
 
 <style>

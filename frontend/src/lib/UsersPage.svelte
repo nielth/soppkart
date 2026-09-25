@@ -1,6 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { addUser, deleteUser, fetchUsers, updateUser, type AdminUser, type AdminUsers, type User } from './api'
+  import {
+    addUser,
+    deleteUser,
+    fetchUsers,
+    formatFoundAt,
+    updateUser,
+    type AdminUser,
+    type AdminUsers,
+    type User,
+  } from './api'
   import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
   import * as Card from '$lib/components/ui/card'
@@ -8,15 +17,15 @@
   import { Label } from '$lib/components/ui/label'
   import { Separator } from '$lib/components/ui/separator'
   import { Switch } from '$lib/components/ui/switch'
-  import { KeyRound, Trash2, UserPlus, X } from '@lucide/svelte'
+  import { KeyRound, Trash2, UserPlus } from '@lucide/svelte'
+  import Page from './Page.svelte'
 
   interface Props {
     /** The admin using the page (can't remove their own admin access). */
     me: User
-    onclose: () => void
   }
 
-  let { me, onclose }: Props = $props()
+  let { me }: Props = $props()
   let data = $state<AdminUsers | null>(null)
   let error = $state<string | null>(null)
   let newUsername = $state('')
@@ -79,14 +88,15 @@
   }
 </script>
 
-<div class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-3 pt-[max(12px,env(safe-area-inset-top))] md:items-center">
-  <Card.Root class="relative w-full max-w-lg gap-4 py-4">
-    <Button variant="ghost" size="icon" class="absolute top-2 right-2 size-8" onclick={onclose} aria-label="Lukk">
-      <X />
-    </Button>
-    <Card.Header class="px-4 pr-12">
-      <Card.Title>Brukere</Card.Title>
-      <Card.Description>Hvem som kan logge inn, og hva de har tilgang til. Admin har tilgang til alt.</Card.Description>
+<Page wide>
+  <Card.Root class="w-full gap-4 py-4">
+    <Card.Header class="px-4">
+      <Card.Title class="text-lg">Brukere</Card.Title>
+      <Card.Description>
+        Hvem som kan logge inn, og hva de har tilgang til. Nye brukere som registrerer seg selv får
+        ingenting ekstra før du gir dem tilgang. «Trening»: funnene deres brukes når modellen trenes,
+        og de kan starte trening. Admin har tilgang til alt.
+      </Card.Description>
     </Card.Header>
 
     <Card.Content class="flex flex-col gap-4 px-4">
@@ -99,9 +109,12 @@
           {#each data.users as user (user.id)}
             <li class="flex flex-col gap-2 rounded-lg border p-3">
               <div class="flex items-center justify-between gap-2">
-                <span class="flex items-center gap-2 font-medium">
-                  {user.username}
-                  {#if user.id === me.id}<Badge variant="secondary">deg</Badge>{/if}
+                <span class="flex flex-col">
+                  <span class="flex items-center gap-2 font-medium">
+                    {user.username}
+                    {#if user.id === me.id}<Badge variant="secondary">deg</Badge>{/if}
+                  </span>
+                  <span class="text-xs text-muted-foreground">Registrert {formatFoundAt(user.created_at)}</span>
                 </span>
                 <span class="flex gap-1">
                   <Button variant="ghost" size="icon" class="size-8" title="Nytt passord" onclick={() => resetPassword(user)}>
@@ -183,4 +196,4 @@
       {/if}
     </Card.Content>
   </Card.Root>
-</div>
+</Page>
