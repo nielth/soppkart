@@ -20,7 +20,10 @@
     fetchStatus,
     findingsUrl,
     IMAGERY_URL,
+    STEEPNESS_CLASSES,
+    STEEPNESS_URL,
     STRAVA_ACTIVITIES,
+    TERRAIN_URL,
     stravaTilesUrl,
     TRAILS_URL,
     myFindingsUrl,
@@ -89,6 +92,7 @@
   let showHeatmap = $state(true)
   let showFindings = $state(true)
   let showTrails = $state(true)
+  let showSteepness = $state(false)
   let showStravaHeat = $state(false)
   let stravaActivity = $state('run')
   let stravaAvailable = $state(false)
@@ -121,6 +125,7 @@
   let tilesTimer: ReturnType<typeof setTimeout> | undefined
 
   const WEIGHTS_STORAGE_KEY = 'soppkart.weights'
+  const TERRAIN_STORAGE_KEY = 'soppkart.terrain'
   const BASEMAP_STORAGE_KEY = 'soppkart.basemap'
   const EMPTY_COLLECTION: FeatureCollection = { type: 'FeatureCollection', features: [] }
 
@@ -147,6 +152,7 @@
       center: [10.75, 59.95],
       zoom: 6,
       maxZoom: 17,
+      maxPitch: 70,
       attributionControl: { compact: true },
     })
 
@@ -157,6 +163,8 @@
       showAccuracyCircle: true,
     })
     map.addControl(geolocate, 'top-right')
+    // 3D terrain on and off (tilt with two fingers, or right-drag / ctrl-drag on a computer).
+    map.addControl(new maplibregl.TerrainControl({ source: 'terrain', exaggeration: 1 }), 'top-right')
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left')
 
     map.on('load', () => {
@@ -174,6 +182,38 @@
         source: 'score',
         paint: { 'raster-opacity': opacity, 'raster-resampling': 'nearest' },
       })
+
+      // Elevation for 3D terrain; only fetched while 3D is on.
+      map!.addSource('terrain', {
+        type: 'raster-dem',
+        tiles: [TERRAIN_URL],
+        encoding: 'terrarium',
+        tileSize: 256,
+        maxzoom: 15,
+        attribution:
+          'Terreng: <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md">Mapzen, AWS m.fl.</a>',
+      })
+      map!.on('terrain', onTerrainChange)
+      if (loadTerrain()) map!.setTerrain({ source: 'terrain', exaggeration: 1 })
+
+      // NVE's steepness map, under the probability colours.
+      map!.addSource('steepness', {
+        type: 'raster',
+        tiles: [STEEPNESS_URL],
+        tileSize: 256,
+        minzoom: 9,
+        attribution: 'Bratthet © <a href="https://www.nve.no/">NVE</a>',
+      })
+      map!.addLayer(
+        {
+          id: 'steepness',
+          type: 'raster',
+          source: 'steepness',
+          layout: { visibility: 'none' },
+          paint: { 'raster-opacity': 0.6 },
+        },
+        'score',
+      )
 
       map!.addSource('trails', {
         type: 'raster',
@@ -566,6 +606,31 @@
     )
   }
 
+  /** Tilt the map when 3D is switched on, and flatten it again when switched off. */
+  function onTerrainChange() {
+    if (!map) return
+    const on = map.getTerrain() !== null
+    saveTerrain(on)
+    if (on && map.getPitch() < 20) map.easeTo({ pitch: 60, duration: 800 })
+    if (!on && map.getPitch() > 0) map.easeTo({ pitch: 0, duration: 800 })
+  }
+
+  function loadTerrain(): boolean {
+    try {
+      return localStorage.getItem(TERRAIN_STORAGE_KEY) === '1'
+    } catch {
+      return false
+    }
+  }
+
+  function saveTerrain(on: boolean) {
+    try {
+      localStorage.setItem(TERRAIN_STORAGE_KEY, on ? '1' : '0')
+    } catch {
+      // Private mode etc.: just don't remember the choice.
+    }
+  }
+
   function loadBasemap(): 'kart' | 'flyfoto' {
     try {
       return localStorage.getItem(BASEMAP_STORAGE_KEY) === 'flyfoto' ? 'flyfoto' : 'kart'
@@ -639,6 +704,12 @@
     const visibility = showTrails ? 'visible' : 'none'
     if (!mapLoaded || !map) return
     map.setLayoutProperty('trails', 'visibility', visibility)
+  })
+
+  $effect(() => {
+    const visibility = showSteepness ? 'visible' : 'none'
+    if (!mapLoaded || !map) return
+    map.setLayoutProperty('steepness', 'visibility', visibility)
   })
 
   $effect(() => {
@@ -854,6 +925,20 @@
               </span>
               <span class="flex items-center gap-1"><span class="h-1 w-4 rounded bg-[#2e7d32]"></span> Sykkel</span>
               <span class="flex items-center gap-1"><span class="h-0.5 w-4 rounded bg-[#616161]"></span> Annet</span>
+            </div>
+          {/if}
+          <div class="flex items-center justify-between gap-2">
+            <Label for="show-steepness">Bratthet (NVE)</Label>
+            <Switch id="show-steepness" bind:checked={showSteepness} />
+          </div>
+          {#if showSteepness}
+            <div class="-mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              {#each STEEPNESS_CLASSES as c (c.label)}
+                <span class="flex items-center gap-1">
+                  <span class="size-2.5 rounded-sm" style:background-color={c.color}></span>
+                  {c.label}
+                </span>
+              {/each}
             </div>
           {/if}
           {#if stravaAvailable}

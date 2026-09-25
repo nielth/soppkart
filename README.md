@@ -94,6 +94,10 @@ whatever the resolution.
   key is restricted by referrer, set `ESRI_REFERER` to that address.
   Tiles are cached in the stack's Redis (memory only, 1 GB) for as long as Esri allows (24 h),
   so the same photos aren't requested again.
+- **3D and steepness:** the mountain button under the zoom buttons switches on 3D terrain
+  (AWS Terrain Tiles, open data, about 30 m detail) and tilts the map; tilt further with two
+  fingers (or right-drag / ctrl-drag on a computer). "Bratthet (NVE)" colours slopes from 27° up
+  with NVE's steepness map (the one used for avalanche terrain).
 - **Registrerte funn:** "Vis registrerte funn" (on by default) shows the GBIF/Artsdatabanken findings the model
   learned from; tap a point for its details (year, precision, type) and a link to GBIF.
 - **Your own finds** (logged in): "📍 Registrer funn her" saves your GPS position (only positions

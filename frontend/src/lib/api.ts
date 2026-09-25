@@ -307,3 +307,25 @@ export function updateUser(
 export function deleteUser(id: number): Promise<unknown> {
   return send(`/api/admin/users/${id}`, 'DELETE')
 }
+
+/**
+ * Elevation tiles for 3D terrain: AWS Terrain Tiles (open, no key; Terrarium encoding,
+ * about 30 m detail in Norway).
+ */
+export const TERRAIN_URL = 'https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png'
+
+/** NVE's steepness map (the one used for avalanche terrain) as transparent WMS tiles. */
+export const STEEPNESS_URL =
+  'https://kart.nve.no/enterprise/services/Bratthet/MapServer/WMSServer?SERVICE=WMS&VERSION=1.3.0' +
+  '&REQUEST=GetMap&LAYERS=Bratthet_snoskred&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}' +
+  '&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true'
+
+/** The steepness map's classes with NVE's colours (under 27° is not drawn). */
+export const STEEPNESS_CLASSES = [
+  { label: '27–30°', color: '#267300' },
+  { label: '30–35°', color: '#ffff00' },
+  { label: '35–40°', color: '#ffaa00' },
+  { label: '40–45°', color: '#ff5500' },
+  { label: '45–50°', color: '#e60000' },
+  { label: '> 50°', color: '#730000' },
+]
