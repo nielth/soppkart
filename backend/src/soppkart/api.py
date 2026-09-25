@@ -6,14 +6,14 @@ import re
 import subprocess
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, cast
+from typing import Annotated, Any, cast
 from xml.etree import ElementTree
 
 import httpx
 import numpy as np
 import rasterio
 import redis.asyncio as redis
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from pyproj import Transformer
@@ -21,7 +21,8 @@ from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.io import Reader
 from rio_tiler.utils import render
 
-from soppkart import config, features, stravaheat, userfindings
+from soppkart import auth, config, features, stravaheat, userfindings
+from soppkart.auth import User
 from soppkart.colormap import DEFAULT_THRESHOLD, colormap
 from soppkart.train import CONTRIB_NODATA, CONTRIB_SCALE, ModelFiles, model_files
 
@@ -39,10 +40,49 @@ def is_training(species: str) -> bool:
     return proc is not None and proc.poll() is None
 
 
-def get_files(species: str) -> ModelFiles:
+def current_user(request: Request) -> User | None:
+    """The logged-in user, or None for visitors."""
+    return auth.user_for_token(request.cookies.get(auth.COOKIE_NAME))
+
+
+def require_user(user: Annotated[User | None, Depends(current_user)]) -> User:
+    if user is None:
+        raise HTTPException(401, "Du må logge inn")
+    return user
+
+
+def require_admin(user: Annotated[User, Depends(require_user)]) -> User:
+    if not user.is_admin:
+        raise HTTPException(403, "Bare for admin")
+    return user
+
+
+# Endpoint parameters: the visitor (None if not logged in), a logged-in user, an admin.
+MaybeUser = Annotated[User | None, Depends(current_user)]
+LoggedIn = Annotated[User, Depends(require_user)]
+Admin = Annotated[User, Depends(require_admin)]
+
+
+def require_permission(user: User | None, permission: str) -> None:
+    if user is None:
+        raise HTTPException(401, "Du må logge inn")
+    if not user.can(permission):
+        raise HTTPException(403, "Du har ikke tilgang til dette")
+
+
+def get_files(species: str, user: User | None) -> ModelFiles:
     if species not in config.SPECIES:
         raise HTTPException(404, f"Ukjent art: {species}")
+    if config.SPECIES[species].restricted:
+        require_permission(user, species)
     return model_files(species)
+
+
+def cache_headers(species: str) -> dict[str, str]:
+    """Restricted species' tiles may only be cached by the user's own browser."""
+    if config.SPECIES[species].restricted:
+        return {"Cache-Control": "private, max-age=3600"}
+    return CACHE_HEADERS
 
 
 def is_ready(files: ModelFiles) -> bool:
@@ -104,17 +144,135 @@ def meta(files: ModelFiles) -> dict[str, Any]:
 
 
 @app.get("/api/config")
-def client_config() -> dict[str, Any]:
-    """Settings the map needs."""
+def client_config(user: MaybeUser) -> dict[str, Any]:
+    """Settings the map needs: which extra layers this user can use."""
     return {
-        "imagery": config.ESRI_API_KEY is not None,
-        "strava": config.STRAVA_SESSION is not None,
+        "imagery": config.ESRI_API_KEY is not None and auth.can(user, "imagery"),
+        "strava": config.STRAVA_SESSION is not None and auth.can(user, "strava"),
     }
+
+
+class Login(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/api/auth/login")
+def login(body: Login, response: Response) -> dict[str, Any]:
+    if auth.is_locked_out(body.username):
+        raise HTTPException(429, "For mange feil forsøk. Prøv igjen om 15 minutter.")
+    result = auth.login(body.username, body.password)
+    if result is None:
+        raise HTTPException(401, "Feil brukernavn eller passord")
+    user, token = result
+    response.set_cookie(
+        auth.COOKIE_NAME,
+        token,
+        max_age=config.SESSION_DAYS * 86_400,
+        httponly=True,
+        samesite="lax",
+        secure=config.COOKIE_SECURE,
+    )
+    return user.as_dict()
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response) -> dict[str, bool]:
+    token = request.cookies.get(auth.COOKIE_NAME)
+    if token:
+        auth.logout(token)
+    response.delete_cookie(auth.COOKIE_NAME)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def me(user: MaybeUser) -> dict[str, Any] | None:
+    return user.as_dict() if user else None
+
+
+class NewPassword(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=8, max_length=200)
+
+
+@app.post("/api/auth/password")
+def change_password(body: NewPassword, user: LoggedIn) -> dict[str, bool]:
+    """Change your own password. Logs you out everywhere, so log in again afterwards."""
+    if auth.login(user.username, body.current_password) is None:
+        raise HTTPException(403, "Feil nåværende passord")
+    auth.update_user(user.id, password=body.new_password)
+    return {"ok": True}
+
+
+def admin_user_dict(user: User) -> dict[str, Any]:
+    # The permissions granted, not everything an admin can do.
+    return {
+        "id": user.id,
+        "username": user.username,
+        "is_admin": user.is_admin,
+        "permissions": sorted(user.permissions),
+    }
+
+
+@app.get("/api/admin/users")
+def admin_users(admin: Admin) -> dict[str, Any]:
+    return {
+        "permissions": [{"key": k, "label": v} for k, v in auth.PERMISSIONS.items()],
+        "users": [admin_user_dict(u) for u in auth.list_users()],
+    }
+
+
+class NewUser(BaseModel):
+    username: str = Field(min_length=1, max_length=100, pattern=r"^[\w.@-]+$")
+    password: str = Field(min_length=8, max_length=200)
+    is_admin: bool = False
+    permissions: list[str] = []
+
+
+@app.post("/api/admin/users")
+def admin_add_user(body: NewUser, admin: Admin) -> dict[str, Any]:
+    try:
+        user = auth.add_user(body.username, body.password, body.is_admin, set(body.permissions))
+    except ValueError as err:
+        raise HTTPException(409, str(err)) from None
+    return admin_user_dict(user)
+
+
+class UserChanges(BaseModel):
+    is_admin: bool | None = None
+    permissions: list[str] | None = None
+    password: str | None = Field(default=None, min_length=8, max_length=200)
+
+
+@app.patch("/api/admin/users/{user_id}")
+def admin_update_user(user_id: int, body: UserChanges, admin: Admin) -> dict[str, Any]:
+    if user_id == admin.id and body.is_admin is False:
+        raise HTTPException(409, "Du kan ikke fjerne din egen admin-tilgang")
+    user = auth.update_user(
+        user_id,
+        is_admin=body.is_admin,
+        permissions=set(body.permissions) if body.permissions is not None else None,
+        password=body.password,
+    )
+    if user is None:
+        raise HTTPException(404, "Fant ikke brukeren")
+    return admin_user_dict(user)
+
+
+@app.delete("/api/admin/users/{user_id}")
+def admin_delete_user(user_id: int, admin: Admin) -> dict[str, bool]:
+    """Deletes the user. Their findings are kept (and still used in training)."""
+    if user_id == admin.id:
+        raise HTTPException(409, "Du kan ikke slette deg selv")
+    if not auth.delete_user(user_id):
+        raise HTTPException(404, "Fant ikke brukeren")
+    return {"deleted": True}
 
 
 _esri_client: httpx.AsyncClient | None = None
 _redis: redis.Redis | None = None
-IMAGERY_HEADERS = {"Cache-Control": "public, max-age=86400"}
+# private: only for logged-in users with access, so no shared caches.
+IMAGERY_HEADERS = {"Cache-Control": "private, max-age=86400"}
 # Cached "no tile here" answers, so missing tiles aren't requested again and again.
 NO_TILE = b"-"
 
@@ -161,12 +319,13 @@ async def cache_set(key: str, value: bytes, seconds: int) -> None:
 
 
 @app.get("/api/imagery/{z}/{x}/{y}.jpg")
-async def imagery(z: int, x: int, y: int) -> Response:
+async def imagery(z: int, x: int, y: int, user: MaybeUser) -> Response:
     """Aerial photo tile from Esri World Imagery.
 
     Fetched here so the API key stays secret, and cached in Redis for as long as
     Esri allows (24 h), so the same photos aren't requested over and over.
     """
+    require_permission(user, "imagery")
     if config.ESRI_API_KEY is None:
         raise HTTPException(404, "Flyfoto er ikke satt opp (ESRI_API_KEY)")
     if not (0 <= z <= 23 and 0 <= x < 2**z and 0 <= y < 2**z):
@@ -196,8 +355,9 @@ async def imagery(z: int, x: int, y: int) -> Response:
 
 
 @app.get("/api/strava/{activity}/{z}/{x}/{y}.png")
-async def strava_tile(activity: str, z: int, x: int, y: int) -> Response:
+async def strava_tile(activity: str, z: int, x: int, y: int, user: MaybeUser) -> Response:
     """Strava global heatmap tile, fetched with your Strava login and cached in Redis."""
+    require_permission(user, "strava")
     heatmap = stravaheat.heatmap()
     if heatmap is None:
         raise HTTPException(404, "Strava heatmap er ikke satt opp (STRAVA_SESSION)")
@@ -315,17 +475,20 @@ async def trails(
 
 
 @app.get("/api/species")
-def species_list() -> list[dict[str, Any]]:
+def species_list(user: MaybeUser) -> list[dict[str, Any]]:
+    """The species this user can see."""
     return [
         {"key": s.key, "name": s.name, "latin": s.latin, "ready": is_ready(model_files(s.key))}
         for s in config.SPECIES.values()
+        if not s.restricted or auth.can(user, s.key)
     ]
 
 
 @app.get("/api/{species}/status")
-def status(species: str) -> dict[str, Any]:
-    files = get_files(species)
-    extra = {"training": is_training(species), "my_findings": len(userfindings.list_for(species))}
+def status(species: str, user: MaybeUser) -> dict[str, Any]:
+    files = get_files(species, user)
+    my_findings = len(userfindings.list_for(species, user.id)) if user else 0
+    extra = {"training": is_training(species), "my_findings": my_findings}
     if not is_ready(files):
         return {
             "ready": False,
@@ -365,6 +528,7 @@ def render_tile(
 @app.get("/api/{species}/tiles/{z}/{x}/{y}.png")
 def tile(
     species: str,
+    user: MaybeUser,
     z: int,
     x: int,
     y: int,
@@ -372,15 +536,15 @@ def tile(
     w: str | None = None,
 ) -> Response:
     """Score tile with weights w per feature group. Scores below threshold are transparent."""
-    files = get_files(species)
+    files = get_files(species, user)
     if not is_ready(files):
         return Response(status_code=204)
     weights = parse_weights(w)
     threshold = round(threshold, 2)
     png = render_tile(species, z, x, y, threshold, weights, files.contrib.stat().st_mtime)
     if png is None:
-        return Response(status_code=204, headers=CACHE_HEADERS)
-    return Response(png, media_type="image/png", headers=CACHE_HEADERS)
+        return Response(status_code=204, headers=cache_headers(species))
+    return Response(png, media_type="image/png", headers=cache_headers(species))
 
 
 def read_pixel(path: Path, x: float, y: float) -> np.ndarray | None:
@@ -402,11 +566,12 @@ def display_value(key: str, value: float) -> float | str | None:
 @app.get("/api/{species}/point")
 def point(
     species: str,
+    user: MaybeUser,
     lat: float = Query(ge=-90, le=90),
     lon: float = Query(ge=-180, le=180),
     w: str | None = None,
 ) -> dict[str, Any]:
-    files = get_files(species)
+    files = get_files(species, user)
     if not is_ready(files):
         raise HTTPException(503, "Modellen er ikke trent ennå")
     weights = parse_weights(w)
@@ -454,8 +619,8 @@ def point(
 
 
 @app.get("/api/{species}/findings.geojson")
-def findings(species: str) -> FileResponse:
-    files = get_files(species)
+def findings(species: str, user: MaybeUser) -> FileResponse:
+    files = get_files(species, user)
     if not files.findings.exists():
         raise HTTPException(404, "Ingen funn lastet ned ennå")
     return FileResponse(files.findings, media_type="application/geo+json")
@@ -469,43 +634,59 @@ class NewFinding(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
-def finding_feature(f: dict[str, Any]) -> dict[str, Any]:
+def finding_feature(f: dict[str, Any], names: dict[int, str] | None = None) -> dict[str, Any]:
+    properties = {k: f[k] for k in ("id", "accuracy_m", "found_at", "note")}
+    if names is not None:
+        properties["username"] = names.get(f["user_id"], "ukjent")
     return {
         "type": "Feature",
         "geometry": {"type": "Point", "coordinates": [f["lon"], f["lat"]]},
-        "properties": {k: f[k] for k in ("id", "accuracy_m", "found_at", "note")},
+        "properties": properties,
     }
 
 
 @app.get("/api/{species}/my-findings")
-def my_findings(species: str) -> dict[str, Any]:
-    get_files(species)
-    return {
-        "type": "FeatureCollection",
-        "features": [finding_feature(f) for f in userfindings.list_for(species)],
-    }
+def my_findings(
+    species: str,
+    user: MaybeUser,
+    scope: str = Query("mine", pattern="^(mine|all)$"),
+) -> dict[str, Any]:
+    """Your findings, or with scope=all (admin only) everyone's, with who found them."""
+    get_files(species, user)
+    if user is None:
+        rows, names = [], None
+    elif scope == "all":
+        if not user.is_admin:
+            raise HTTPException(403, "Bare admin kan se alle funn")
+        rows, names = userfindings.list_for(species), auth.usernames()
+    else:
+        rows, names = userfindings.list_for(species, user.id), None
+    return {"type": "FeatureCollection", "features": [finding_feature(f, names) for f in rows]}
 
 
 @app.post("/api/{species}/my-findings")
-def add_my_finding(species: str, finding: NewFinding) -> dict[str, Any]:
-    get_files(species)
+def add_my_finding(species: str, finding: NewFinding, user: LoggedIn) -> dict[str, Any]:
+    get_files(species, user)
     # A spot picked on the map is where you say it is.
     accuracy = finding.accuracy_m if finding.accuracy_m is not None else 5.0
-    added = userfindings.add(species, finding.lat, finding.lon, accuracy, finding.note)
+    added = userfindings.add(user.id, species, finding.lat, finding.lon, accuracy, finding.note)
     return finding_feature(added)
 
 
 @app.delete("/api/my-findings/{finding_id}")
-def delete_my_finding(finding_id: int) -> dict[str, bool]:
-    if not userfindings.delete(finding_id):
+def delete_my_finding(finding_id: int, user: LoggedIn) -> dict[str, bool]:
+    """Delete one of your findings; admins can delete anyone's."""
+    finding = userfindings.get(finding_id)
+    if finding is None or (finding["user_id"] != user.id and not user.is_admin):
         raise HTTPException(404, "Fant ikke funnet")
+    userfindings.delete(finding_id)
     return {"deleted": True}
 
 
 @app.post("/api/{species}/retrain")
-def retrain(species: str) -> dict[str, bool]:
-    """Retrain the species' model in the background, with your own findings."""
-    get_files(species)
+def retrain(species: str, user: LoggedIn) -> dict[str, bool]:
+    """Retrain the species' model in the background, with everyone's own findings."""
+    get_files(species, user)
     if is_training(species):
         raise HTTPException(409, "Modellen trenes allerede")
     log_path = config.DATA_DIR / "user" / f"train_{species}.log"

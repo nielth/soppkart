@@ -36,6 +36,20 @@ Settings go in `.env` (or the stack's Environment in Komodo):
 | `CDSE_S3_ACCESS_KEY`, `CDSE_S3_SECRET_KEY` | Copernicus keys, only needed when rebuilding data from scratch |
 | `ESRI_API_KEY`, `ESRI_REFERER` | Optional: aerial photo background (see Using the map) |
 | `STRAVA_SESSION` | Optional: your `_strava4_session` cookie for the Strava heatmap layer |
+| `SOPPKART_COOKIE_SECURE` | `true` when the site is served over HTTPS: the login cookie is then never sent over plain HTTP |
+
+**Logins:** visitors see the map for the open species. Flyfoto, the Strava heatmap, spiss
+fleinsopp and saving your own finds need a login. Create the first admin on the server
+(it asks for a password; findings saved before logins existed become this admin's):
+
+```bash
+docker compose exec backend soppkart adduser --username thomas --admin
+```
+
+Then log in on the site (Konto in the panel) and add more users under **Brukere**: each user gets
+their own login and the layers an admin grants them (Flyfoto, Strava heatmap, Spiss fleinsopp).
+Admins have everything. Users are stored in `data/user/users.sqlite` (passwords hashed with
+scrypt; a session lasts 180 days, and a new password logs the user out everywhere).
 
 The raw downloads (~21 GB) live in the named volume `raw`; they are only needed to rebuild the
 features. Everything the running site needs is in `SOPPKART_DATA`: `features/`, `model/`,
@@ -78,11 +92,12 @@ whatever the resolution.
   so the same photos aren't requested again.
 - **Registrerte funn:** "Vis registrerte funn" (on by default) shows the GBIF/Artsdatabanken findings the model
   learned from; tap a point for its details (year, precision, type) and a link to GBIF.
-- **Your own finds:** "📍 Registrer funn her" saves your GPS position (only positions accurate to
-  50 m are used for training), or tap a spot and choose "Jeg fant … her". Your finds are green
-  dots; tap one to delete it. "Tren modellen med mine funn" retrains that species in the
-  background (a few minutes). Your finds count `SOPPKART_OWN_FINDING_WEIGHT` (default 3) times as
-  much as a GBIF finding. They are stored in `data/user/findings.sqlite`.
+- **Your own finds** (logged in): "📍 Registrer funn her" saves your GPS position (only positions
+  accurate to 50 m are used for training), or tap a spot and choose "Jeg fant … her". Your finds
+  are green dots; tap one to delete it. Each user sees only their own finds; admins can switch
+  between "Mine" and "Alle brukere". "Tren modellen med mine funn" retrains that species in the
+  background (a few minutes) with every user's finds, each counting `SOPPKART_OWN_FINDING_WEIGHT`
+  (default 3) times as much as a GBIF finding. They are stored in `data/user/findings.sqlite`.
 
 ## How it works
 

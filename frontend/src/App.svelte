@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import * as maplibregl from 'maplibre-gl'
   import type { FeatureCollection } from 'geojson'
   import 'maplibre-gl/dist/maplibre-gl.css'
@@ -10,6 +10,7 @@
     addMyFinding,
     deleteMyFinding,
     fetchConfig,
+    fetchMe,
     fetchMyFindings,
     fetchPoint,
     fetchSpecies,
@@ -25,12 +26,16 @@
     startRetrain,
     tilesUrl,
     weightsParam,
+    type FindingsScope,
     type MyFinding,
     type PointInfo,
     type TrailRoute,
     type Species,
     type Status,
+    type User,
   } from './lib/api'
+  import AccountCard from './lib/AccountCard.svelte'
+  import AdminPanel from './lib/AdminPanel.svelte'
   import Legend from './lib/Legend.svelte'
   import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
@@ -64,6 +69,11 @@
   const TOP_PCT_STORAGE_KEY = 'soppkart.topPct.v2'
   const DEFAULT_TOP_PCT = 5
 
+  // The logged-in user (null for visitors), which decides what the map may show.
+  let user = $state<User | null>(null)
+  let showAdmin = $state(false)
+  // Admins can list everyone's findings instead of just their own.
+  let findingsScope = $state<FindingsScope>('mine')
   let speciesList = $state<Species[]>([])
   let species = $state(loadSpecies())
   let status = $state<Status | null>(null)
@@ -243,7 +253,7 @@
         paint: { 'line-color': '#1f78b4', 'line-width': 2 },
       })
 
-      map!.addSource('my-findings', { type: 'geojson', data: myFindingsUrl(species) })
+      map!.addSource('my-findings', { type: 'geojson', data: myFindingsUrl(species, findingsScope) })
       map!.addLayer({
         id: 'my-findings',
         type: 'circle',
@@ -270,26 +280,47 @@
 
     map.on('click', (e) => onMapClick(e))
 
-    fetchConfig()
-      .then((c) => {
-        imageryAvailable = c.imagery
-        stravaAvailable = c.strava
-        if (imageryAvailable && map?.isStyleLoaded() && !map.getLayer('imagery')) addImagery()
-      })
-      .catch(() => (imageryAvailable = false))
-
-    fetchSpecies()
-      .then((list) => {
-        speciesList = list
-        if (!list.some((s) => s.key === species) && list.length > 0) species = list[0].key
-      })
-      .catch((err) => (statusError = String(err)))
+    loadAccess()
 
     return () => {
       clearInterval(trainPoll)
       map?.remove()
     }
   })
+
+  /**
+   * Who is logged in, and what they may see: extra layers, species and findings.
+   * Run at start and after logging in or out.
+   */
+  async function loadAccess() {
+    try {
+      user = await fetchMe()
+    } catch {
+      user = null
+    }
+    if (!user?.is_admin) findingsScope = 'mine'
+    fetchConfig()
+      .then((c) => {
+        imageryAvailable = c.imagery
+        stravaAvailable = c.strava
+        if (imageryAvailable && mapLoaded && map && !map.getLayer('imagery')) addImagery()
+      })
+      .catch(() => {
+        imageryAvailable = false
+        stravaAvailable = false
+      })
+    fetchSpecies()
+      .then((list) => {
+        speciesList = list
+        // E.g. after logging out while looking at a species only for logged-in users.
+        if (!list.some((s) => s.key === species) && list.length > 0) species = list[0].key
+        else {
+          refreshStatus(species)
+          refreshMyFindings(species)
+        }
+      })
+      .catch((err) => (statusError = String(err)))
+  }
 
   // Everything that depends on the chosen species.
   $effect(() => {
@@ -301,6 +332,11 @@
     map?.getSource<maplibregl.GeoJSONSource>('findings')?.setData(findingsUrl(key))
     refreshMyFindings(key)
     if (selected) loadPoint(selected.lat, selected.lon)
+  })
+
+  $effect(() => {
+    void findingsScope
+    untrack(() => refreshMyFindings(species))
   })
 
   // The sliders: re-request tiles (and the tapped point) shortly after they stop moving.
@@ -330,7 +366,9 @@
         clearInterval(trainPoll)
         if (s.training) trainPoll = setInterval(() => refreshStatus(key), 15000)
       })
-      .catch((err) => (statusError = String(err)))
+      .catch((err) => {
+        if (key === species) statusError = String(err)
+      })
   }
 
   async function registerFinding(lat: number, lon: number, accuracy: number | null) {
@@ -351,11 +389,17 @@
   function showMyFinding(feature: maplibregl.MapGeoJSONFeature) {
     if (!map || feature.geometry.type !== 'Point') return
     const [lon, lat] = feature.geometry.coordinates
-    const { id, found_at, accuracy_m } = feature.properties as { id: number; found_at: string; accuracy_m: number }
+    const { id, found_at, accuracy_m, username } = feature.properties as {
+      id: number
+      found_at: string
+      accuracy_m: number
+      username?: string
+    }
     const content = document.createElement('div')
     content.className = 'finding-popup'
     const text = document.createElement('div')
-    text.textContent = `Ditt funn ${formatFoundAt(found_at)} (±${Math.round(accuracy_m)} m)`
+    const whose = username ? `Funn av ${username}` : 'Ditt funn'
+    text.textContent = `${whose} ${formatFoundAt(found_at)} (±${Math.round(accuracy_m)} m)`
     const button = document.createElement('button')
     button.textContent = 'Slett'
     const popup = showFindingPopup(lon, lat, accuracy_m, content)
@@ -365,12 +409,14 @@
     content.append(text, button)
   }
 
-  /** Reload your findings for the list and the map. */
+  /** Reload your findings (or, for admins, everyone's) for the list and the map. */
   async function refreshMyFindings(key: string) {
-    map?.getSource<maplibregl.GeoJSONSource>('my-findings')?.setData(myFindingsUrl(key))
+    // Not tracked, so the species effect doesn't re-run when the scope changes.
+    const scope = untrack(() => findingsScope)
+    map?.getSource<maplibregl.GeoJSONSource>('my-findings')?.setData(myFindingsUrl(key, scope))
     try {
-      const list = await fetchMyFindings(key)
-      if (key === species) myFindings = list
+      const list = await fetchMyFindings(key, scope)
+      if (key === species && scope === findingsScope) myFindings = list
     } catch (err) {
       findingMessage = `Kunne ikke hente dine funn: ${err}`
     }
@@ -711,6 +757,8 @@
       <div class="rounded-md border bg-accent px-3 py-2 text-xs">{status.message}</div>
     {/if}
 
+    <AccountCard {user} onchange={loadAccess} onadmin={() => ((showAdmin = true), (sidebarOpen = false))} />
+
     <Card.Root class="gap-3 py-4">
       <Card.Header class="px-4">
         <Card.Title class="text-sm">Art</Card.Title>
@@ -866,6 +914,22 @@
         <Card.Title class="flex items-center gap-2 text-sm"><MapPin class="size-4" /> Mine funn</Card.Title>
       </Card.Header>
       <Card.Content class="flex flex-col gap-3 px-4">
+        {#if !user}
+          <p class="text-xs text-muted-foreground">Logg inn for å registrere og se dine egne funn.</p>
+        {:else}
+        {#if user.is_admin}
+          <ToggleGroup.Root
+            type="single"
+            variant="outline"
+            size="sm"
+            class="w-full"
+            value={findingsScope}
+            onValueChange={(v) => v && (findingsScope = v as FindingsScope)}
+          >
+            <ToggleGroup.Item value="mine" class="flex-1">Mine</ToggleGroup.Item>
+            <ToggleGroup.Item value="all" class="flex-1">Alle brukere</ToggleGroup.Item>
+          </ToggleGroup.Root>
+        {/if}
         <Button
           class="bg-success text-white hover:bg-success/90"
           disabled={!gps}
@@ -892,6 +956,7 @@
               {#each myFindings as f (f.id)}
                 <li class="flex items-center justify-between gap-2 px-2 py-1.5">
                   <span>
+                    {#if f.username}<span class="font-medium">{f.username}</span>{/if}
                     {formatFoundAt(f.found_at)}
                     {#if f.accuracy_m !== null}<span class="text-muted-foreground">±{Math.round(f.accuracy_m)} m</span>{/if}
                   </span>
@@ -913,6 +978,7 @@
           <Button variant="outline" disabled={!myFindings.length} onclick={retrain}>
             <Sparkles /> Tren modellen med mine funn
           </Button>
+        {/if}
         {/if}
       </Card.Content>
     </Card.Root>
@@ -964,11 +1030,16 @@
         {status}
         {routes}
         onclose={closePanel}
+        canregister={user !== null}
         onregister={(lat, lon) => registerFinding(lat, lon, null)}
       />
     {/if}
   </main>
 </div>
+
+{#if showAdmin && user?.is_admin}
+  <AdminPanel me={user} onclose={() => (showAdmin = false)} />
+{/if}
 
 <style>
   :global(.finding-popup) {

@@ -12,6 +12,8 @@
 #   ESRI_REFERER        your site's address, if the key is restricted by referrer
 #   STRAVA_SESSION      your _strava4_session cookie from strava.com, for the Strava
 #                       heatmap layer (optional; heatmap access is renewed automatically)
+#   SOPPKART_COOKIE_SECURE  true when the site is served over HTTPS, so the login
+#                       cookie is never sent over plain HTTP
 services:
   backend:
     build: ./backend
@@ -25,6 +27,7 @@ services:
       ESRI_API_KEY: ${ESRI_API_KEY:-}
       ESRI_REFERER: ${ESRI_REFERER:-}
       STRAVA_SESSION: ${STRAVA_SESSION:-}
+      SOPPKART_COOKIE_SECURE: ${SOPPKART_COOKIE_SECURE:-}
       REDIS_URL: redis://soppkart-redis:6379/0
     depends_on:
       - redis

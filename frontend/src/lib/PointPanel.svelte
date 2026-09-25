@@ -13,11 +13,13 @@
     status: Status | null
     /** Hiking/ski/cycle routes near the spot (Kartverket, incl. DNT/UT.no). */
     routes: TrailRoute[]
+    /** Only logged-in users can save findings. */
+    canregister: boolean
     onclose: () => void
     onregister: (lat: number, lon: number) => void
   }
 
-  let { point, loading, error, status, routes, onclose, onregister }: Props = $props()
+  let { point, loading, error, status, routes, canregister, onclose, onregister }: Props = $props()
   let registered = $state(false)
 
   // A new spot gets a fresh "register" button.
@@ -140,6 +142,7 @@
           >
             <ExternalLink /> Google Maps
           </Button>
+          {#if canregister}
           <Button
             size="sm"
             class="bg-success text-white hover:bg-success/90"
@@ -151,6 +154,7 @@
           >
             {#if registered}<Check /> Lagret{:else}<MapPinPlus /> Jeg fant {status?.model?.name ?? 'sopp'} her{/if}
           </Button>
+          {/if}
         </div>
 
         {#if scorePct !== null}

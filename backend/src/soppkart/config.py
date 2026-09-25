@@ -26,6 +26,11 @@ REDIS_URL = os.environ.get("REDIS_URL") or None
 # Used when Esri doesn't say how long a tile may be cached (it normally says 24 h).
 IMAGERY_CACHE_DEFAULT_S = 86_400
 
+# Login sessions. Set SOPPKART_COOKIE_SECURE=true when the site is served over
+# HTTPS, so the login cookie is never sent over plain HTTP.
+SESSION_DAYS = 180
+COOKIE_SECURE = os.environ.get("SOPPKART_COOKIE_SECURE", "").lower() in ("1", "true", "yes")
+
 ESRI_IMAGERY_URL = (
     "https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 )
@@ -54,6 +59,8 @@ class Species:
     max_forest_pct: float | None = None
     # Max share (%) of crop fields + mowed grass (Copernicus HRL): land worked by tractors.
     max_cultivated_pct: float | None = None
+    # Only shown to users an admin has given access to (see auth.PERMISSIONS).
+    restricted: bool = False
 
 
 SPECIES = {
@@ -91,6 +98,7 @@ SPECIES = {
             [5242507],
             max_forest_pct=50,
             max_cultivated_pct=50,
+            restricted=True,
         ),
         # The genus (spiselig morkel, toppmorkel), not the poisonous stenmorkel
         # (Gyromitra). Grows in gardens, burnt ground, riverbanks and forest

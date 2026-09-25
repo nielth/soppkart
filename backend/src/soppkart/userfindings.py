@@ -1,7 +1,8 @@
-"""Findings registered by the user in the app, stored in SQLite.
+"""Findings registered by users in the app, stored in SQLite.
 
-They are used as training data together with the GBIF findings (see
-train.load_findings), weighted by config.OWN_FINDING_WEIGHT.
+Each finding belongs to the user who registered it. All users' findings are
+used as training data together with the GBIF findings (see train.load_findings),
+weighted by config.OWN_FINDING_WEIGHT.
 """
 
 import sqlite3
@@ -32,6 +33,10 @@ def connect() -> Iterator[sqlite3.Connection]:
                 found_at TEXT NOT NULL,
                 note TEXT
             )""")
+        # Findings from before logins existed have no owner (NULL) until claimed.
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(findings)")}
+        if "user_id" not in columns:
+            conn.execute("ALTER TABLE findings ADD COLUMN user_id INTEGER")
         yield conn
         conn.commit()
     finally:
@@ -39,17 +44,24 @@ def connect() -> Iterator[sqlite3.Connection]:
 
 
 def add(
-    species: str, lat: float, lon: float, accuracy_m: float | None, note: str | None
+    user_id: int,
+    species: str,
+    lat: float,
+    lon: float,
+    accuracy_m: float | None,
+    note: str | None,
 ) -> dict[str, Any]:
     found_at = datetime.now(UTC).isoformat(timespec="seconds")
     with connect() as conn:
         cur = conn.execute(
-            "INSERT INTO findings (species, lat, lon, accuracy_m, found_at, note) VALUES (?, ?, ?, ?, ?, ?)",
-            (species, lat, lon, accuracy_m, found_at, note),
+            "INSERT INTO findings (user_id, species, lat, lon, accuracy_m, found_at, note)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, species, lat, lon, accuracy_m, found_at, note),
         )
         row_id = cur.lastrowid
     return {
         "id": row_id,
+        "user_id": user_id,
         "species": species,
         "lat": lat,
         "lon": lon,
@@ -59,12 +71,25 @@ def add(
     }
 
 
-def list_for(species: str) -> list[dict[str, Any]]:
+def list_for(species: str, user_id: int | None = None) -> list[dict[str, Any]]:
+    """The species' findings by one user, or by everyone when user_id is None."""
     with connect() as conn:
-        rows = conn.execute(
-            "SELECT * FROM findings WHERE species = ? ORDER BY found_at", (species,)
-        ).fetchall()
+        if user_id is None:
+            rows = conn.execute(
+                "SELECT * FROM findings WHERE species = ? ORDER BY found_at", (species,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM findings WHERE species = ? AND user_id = ? ORDER BY found_at",
+                (species, user_id),
+            ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get(finding_id: int) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM findings WHERE id = ?", (finding_id,)).fetchone()
+    return dict(row) if row else None
 
 
 def delete(finding_id: int) -> bool:
@@ -73,8 +98,15 @@ def delete(finding_id: int) -> bool:
     return cur.rowcount > 0
 
 
+def claim_unowned(user_id: int) -> int:
+    """Give findings without an owner (from before logins) to a user. Returns how many."""
+    with connect() as conn:
+        cur = conn.execute("UPDATE findings SET user_id = ? WHERE user_id IS NULL", (user_id,))
+    return cur.rowcount
+
+
 def as_frame(species: str) -> pl.DataFrame:
-    """The species' own findings with the same columns as the GBIF findings."""
+    """All users' findings of the species, with the same columns as the GBIF findings."""
     rows = list_for(species)
     return pl.DataFrame(
         {

@@ -52,12 +52,21 @@ export interface PointInfo {
   features: FeatureValue[]
 }
 
+/** The backend's error message ({"detail": "..."}), or the status and body. */
+async function errorOf(res: Response): Promise<Error> {
+  const body = await res.text()
+  try {
+    const detail = (JSON.parse(body) as { detail?: unknown }).detail
+    if (typeof detail === 'string') return new Error(detail)
+  } catch {
+    // Not JSON: fall through.
+  }
+  return new Error(`${res.status}: ${body}`)
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url)
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`${res.status}: ${body}`)
-  }
+  if (!res.ok) throw await errorOf(res)
   return res.json() as Promise<T>
 }
 
@@ -105,8 +114,11 @@ export function findingsUrl(species: string): string {
   return `${location.origin}/api/${species}/findings.geojson`
 }
 
-export function myFindingsUrl(species: string): string {
-  return `${location.origin}/api/${species}/my-findings`
+/** Whose findings to show: your own, or (admins only) everyone's. */
+export type FindingsScope = 'mine' | 'all'
+
+export function myFindingsUrl(species: string, scope: FindingsScope): string {
+  return `${location.origin}/api/${species}/my-findings?scope=${scope}`
 }
 
 async function send<T>(url: string, method: string, body?: unknown): Promise<T> {
@@ -115,7 +127,7 @@ async function send<T>(url: string, method: string, body?: unknown): Promise<T> 
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
+  if (!res.ok) throw await errorOf(res)
   return res.json() as Promise<T>
 }
 
@@ -138,12 +150,14 @@ export interface MyFinding {
   lon: number
   accuracy_m: number | null
   found_at: string
+  /** Who found it; only in the admin's "all users" view. */
+  username?: string
 }
 
-export async function fetchMyFindings(species: string): Promise<MyFinding[]> {
+export async function fetchMyFindings(species: string, scope: FindingsScope): Promise<MyFinding[]> {
   const collection = await getJson<{
     features: { geometry: { coordinates: [number, number] }; properties: Omit<MyFinding, 'lat' | 'lon'> }[]
-  }>(`/api/${species}/my-findings`)
+  }>(myFindingsUrl(species, scope))
   return collection.features
     .map((f) => ({ ...f.properties, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] }))
     .sort((a, b) => b.found_at.localeCompare(a.found_at))
@@ -232,4 +246,62 @@ export function fetchTrails(lat: number, lon: number, toleranceM: number): Promi
     tolerance_m: toleranceM.toFixed(0),
   })
   return getJson<TrailRoute[]>(`/api/trails?${params}`)
+}
+
+export interface User {
+  id: number
+  username: string
+  is_admin: boolean
+  /** Everything this user can use (admins: all). */
+  permissions: string[]
+}
+
+/** The logged-in user, or null for visitors. */
+export function fetchMe(): Promise<User | null> {
+  return getJson<User | null>('/api/auth/me')
+}
+
+export function login(username: string, password: string): Promise<User> {
+  return send<User>('/api/auth/login', 'POST', { username, password })
+}
+
+export function logout(): Promise<unknown> {
+  return send('/api/auth/logout', 'POST')
+}
+
+export function changePassword(currentPassword: string, newPassword: string): Promise<unknown> {
+  return send('/api/auth/password', 'POST', { current_password: currentPassword, new_password: newPassword })
+}
+
+/** A user as the admin page sees it: the permissions granted (admins have all anyway). */
+export interface AdminUser {
+  id: number
+  username: string
+  is_admin: boolean
+  permissions: string[]
+}
+
+export interface AdminUsers {
+  /** What can be granted, with labels. */
+  permissions: { key: string; label: string }[]
+  users: AdminUser[]
+}
+
+export function fetchUsers(): Promise<AdminUsers> {
+  return getJson<AdminUsers>('/api/admin/users')
+}
+
+export function addUser(user: { username: string; password: string; is_admin: boolean; permissions: string[] }): Promise<AdminUser> {
+  return send<AdminUser>('/api/admin/users', 'POST', user)
+}
+
+export function updateUser(
+  id: number,
+  changes: { is_admin?: boolean; permissions?: string[]; password?: string },
+): Promise<AdminUser> {
+  return send<AdminUser>(`/api/admin/users/${id}`, 'PATCH', changes)
+}
+
+export function deleteUser(id: number): Promise<unknown> {
+  return send(`/api/admin/users/${id}`, 'DELETE')
 }
