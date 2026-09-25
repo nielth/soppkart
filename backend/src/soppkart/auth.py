@@ -129,6 +129,12 @@ def get_user(user_id: int) -> User | None:
     return user_from_row(row) if row else None
 
 
+def get_user_by_name(username: str) -> User | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    return user_from_row(row) if row else None
+
+
 def usernames() -> dict[int, str]:
     return {u.id: u.username for u in list_users()}
 

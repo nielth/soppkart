@@ -10,17 +10,26 @@ from soppkart.grid import Grid
 
 
 def add_user(username: str, is_admin: bool) -> None:
-    """Create a user, asking for the password. The first admin gets old unowned findings."""
+    """Create a user, asking for the password. The first admin gets old unowned findings.
+
+    For an existing user (e.g. one who registered on the site), sets the new password
+    and, with --admin, makes them admin.
+    """
     password = getpass.getpass(f"Passord for {username}: ")
     if len(password) < 8:
         sys.exit("Passordet må ha minst 8 tegn")
     if getpass.getpass("Gjenta passord: ") != password:
         sys.exit("Passordene er ulike")
-    try:
+    existing = auth.get_user_by_name(username)
+    if existing is not None:
+        user = auth.update_user(
+            existing.id, is_admin=is_admin or existing.is_admin, password=password
+        )
+        assert user is not None
+        print(f"Oppdaterte {'admin' if user.is_admin else 'bruker'} {user.username} (nytt passord)")
+    else:
         user = auth.add_user(username, password, is_admin, set())
-    except ValueError as err:
-        sys.exit(str(err))
-    print(f"Opprettet {'admin' if is_admin else 'bruker'} {user.username}")
+        print(f"Opprettet {'admin' if is_admin else 'bruker'} {user.username}")
     if is_admin:
         claimed = userfindings.claim_unowned(user.id)
         if claimed:

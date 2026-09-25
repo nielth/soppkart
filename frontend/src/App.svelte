@@ -753,7 +753,7 @@
   }
 </script>
 
-<Sidebar.Provider class="h-svh min-h-0" style="--sidebar-width: 20rem">
+<Sidebar.Provider class="h-dvh min-h-0" style="--sidebar-width: 20rem">
   <SidebarBridge bind:sidebar />
   <Sidebar.Root>
     <Sidebar.Header>
@@ -1045,8 +1045,12 @@
   </Sidebar.Root>
 
   <Sidebar.Inset class="min-w-0">
-    <!-- h-full/w-full rather than absolute: MapLibre's own CSS sets position: relative. -->
-    <div class="h-full w-full" bind:this={mapEl}></div>
+    <!-- The map is as tall as the whole screen (100lvh), reaching behind Safari's toolbars
+         on iPhone; everything else stays in the visible part. The map element itself is
+         h-full/w-full inside a wrapper, since MapLibre's CSS sets it to position: relative. -->
+    <div class="absolute inset-x-0 top-0 h-lvh">
+      <div class="h-full w-full" bind:this={mapEl}></div>
+    </div>
     <Sidebar.Trigger
       variant="secondary"
       size="icon"

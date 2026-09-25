@@ -122,12 +122,27 @@
   }
 }
 
+/* The page is as tall as the screen with Safari's toolbars hidden (100lvh), so the
+   map reaches behind the toolbars on iPhone instead of leaving black bands. The
+   layout itself is the visible part (100dvh, see App.svelte). */
 html,
 body,
 #app {
   margin: 0;
   height: 100%;
+  height: 100lvh;
   overflow: hidden;
+}
+
+/* The map's own controls stay in the visible part: clear of the notch at the top,
+   and above Safari's toolbar (the difference between 100lvh and 100dvh) at the bottom. */
+.maplibregl-map .maplibregl-ctrl-top-right {
+  top: env(safe-area-inset-top);
+}
+
+.maplibregl-map .maplibregl-ctrl-bottom-left,
+.maplibregl-map .maplibregl-ctrl-bottom-right {
+  bottom: calc(100lvh - 100dvh + env(safe-area-inset-bottom));
 }
 
 /* Popups for findings on the map (MapLibre renders these outside Svelte).
