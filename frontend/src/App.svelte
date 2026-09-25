@@ -1076,7 +1076,7 @@
     <AuthPage mode={router.path === '/login' ? 'login' : 'register'} ondone={afterLogin} />
   {/key}
 {:else if router.path === '/brukere' && user?.is_admin}
-  <UsersPage me={user} />
+  <UsersPage me={user} onselfchange={loadAccess} />
 {/if}
 
 <style>

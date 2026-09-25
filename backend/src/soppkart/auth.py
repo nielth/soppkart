@@ -1,7 +1,8 @@
 """Users, passwords, login sessions and permissions, stored in SQLite.
 
-Admins can do everything. Other users only get what an admin has granted them
-(see PERMISSIONS); visitors who aren't logged in get none of it.
+Admins manage users and can see everyone's findings. What anyone can use,
+admins included, is what's switched on for them (see PERMISSIONS); visitors
+who aren't logged in get none of it.
 """
 
 import hashlib
@@ -49,15 +50,14 @@ class User:
     created_at: str
 
     def can(self, permission: str) -> bool:
-        return self.is_admin or permission in self.permissions
+        return permission in self.permissions
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "username": self.username,
             "is_admin": self.is_admin,
-            # Everything this user can use, so the app doesn't need to know about admins.
-            "permissions": sorted(p for p in PERMISSIONS if self.can(p)),
+            "permissions": sorted(self.permissions),
         }
 
 
@@ -84,6 +84,14 @@ def connect() -> Iterator[sqlite3.Connection]:
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 expires_at REAL NOT NULL
             )""")
+        # Version 1: admins no longer get every permission automatically, so the
+        # admins from before keep what they had by getting them all switched on once.
+        if conn.execute("PRAGMA user_version").fetchone()[0] < 1:
+            conn.execute(
+                "UPDATE users SET permissions = ? WHERE is_admin = 1",
+                (",".join(sorted(PERMISSIONS)),),
+            )
+            conn.execute("PRAGMA user_version = 1")
         yield conn
         conn.commit()
     finally:

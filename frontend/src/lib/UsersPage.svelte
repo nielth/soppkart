@@ -23,9 +23,11 @@
   interface Props {
     /** The admin using the page (can't remove their own admin access). */
     me: User
+    /** Called when the admin changes their own access, so the map can update. */
+    onselfchange: () => void
   }
 
-  let { me }: Props = $props()
+  let { me, onselfchange }: Props = $props()
   let data = $state<AdminUsers | null>(null)
   let error = $state<string | null>(null)
   let newUsername = $state('')
@@ -58,9 +60,10 @@
     await load()
   }
 
-  function togglePermission(user: AdminUser, key: string, on: boolean) {
+  async function togglePermission(user: AdminUser, key: string, on: boolean) {
     const permissions = on ? [...user.permissions, key] : user.permissions.filter((p) => p !== key)
-    change(() => updateUser(user.id, { permissions }))
+    await change(() => updateUser(user.id, { permissions }))
+    if (user.id === me.id) onselfchange()
   }
 
   function resetPassword(user: AdminUser) {
@@ -95,7 +98,8 @@
       <Card.Description>
         Hvem som kan logge inn, og hva de har tilgang til. Nye brukere som registrerer seg selv får
         ingenting ekstra før du gir dem tilgang. «Trening»: funnene deres brukes når modellen trenes,
-        og de kan starte trening. Admin har tilgang til alt.
+        og de kan starte trening. Admin kan i tillegg administrere brukere og se alle funn; tilgangene
+        slås av og på på samme måte for admin.
       </Card.Description>
     </Card.Header>
 
@@ -144,11 +148,10 @@
                 </div>
                 {#each data.permissions as p (p.key)}
                   <div class="flex items-center justify-between gap-2">
-                    <Label for="{p.key}-{user.id}" class={user.is_admin ? 'text-muted-foreground' : ''}>{p.label}</Label>
+                    <Label for="{p.key}-{user.id}">{p.label}</Label>
                     <Switch
                       id="{p.key}-{user.id}"
-                      checked={user.is_admin || user.permissions.includes(p.key)}
-                      disabled={user.is_admin}
+                      checked={user.permissions.includes(p.key)}
                       onCheckedChange={(on) => togglePermission(user, p.key, on)}
                     />
                   </div>
@@ -181,8 +184,7 @@
                 <Label for="new-{p.key}">{p.label}</Label>
                 <Switch
                   id="new-{p.key}"
-                  checked={newIsAdmin || newPermissions.includes(p.key)}
-                  disabled={newIsAdmin}
+                  checked={newPermissions.includes(p.key)}
                   onCheckedChange={(on) =>
                     (newPermissions = on ? [...newPermissions, p.key] : newPermissions.filter((k) => k !== p.key))}
                 />

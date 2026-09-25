@@ -13,7 +13,8 @@ def add_user(username: str, is_admin: bool) -> None:
     """Create a user, asking for the password. The first admin gets old unowned findings.
 
     For an existing user (e.g. one who registered on the site), sets the new password
-    and, with --admin, makes them admin.
+    and, with --admin, makes them admin. An admin made here gets every permission
+    switched on; they can switch them off again under Brukere.
     """
     password = getpass.getpass(f"Passord for {username}: ")
     if len(password) < 8:
@@ -23,12 +24,16 @@ def add_user(username: str, is_admin: bool) -> None:
     existing = auth.get_user_by_name(username)
     if existing is not None:
         user = auth.update_user(
-            existing.id, is_admin=is_admin or existing.is_admin, password=password
+            existing.id,
+            is_admin=is_admin or existing.is_admin,
+            permissions=set(auth.PERMISSIONS) if is_admin else None,
+            password=password,
         )
         assert user is not None
         print(f"Oppdaterte {'admin' if user.is_admin else 'bruker'} {user.username} (nytt passord)")
     else:
-        user = auth.add_user(username, password, is_admin, set())
+        permissions = set(auth.PERMISSIONS) if is_admin else set()
+        user = auth.add_user(username, password, is_admin, permissions)
         print(f"Opprettet {'admin' if is_admin else 'bruker'} {user.username}")
     if is_admin:
         claimed = userfindings.claim_unowned(user.id)

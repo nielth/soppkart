@@ -42,9 +42,10 @@ Settings go in `.env` (or the stack's Environment in Komodo):
 Anyone can register at `/registrer` (or log in at `/login`) and then save their own finds.
 Everything else needs an admin to grant it under **Brukere** (`/brukere`): Flyfoto, Strava heatmap,
 Spiss fleinsopp and **Trening** (the user's finds are used when the model is trained, and they may
-start training; without it, strangers who register can't skew the model). Admins have
-everything. Create the first admin on the server (it asks for a password; findings saved before
-logins existed become this admin's):
+start training; without it, strangers who register can't skew the model). Admins can also
+manage users and see everyone's finds; their own access is switched on and off the same way,
+under Brukere. Create the first admin on the server (it asks for a password, switches on
+everything, and findings saved before logins existed become this admin's):
 
 ```bash
 docker compose exec backend soppkart adduser --username thomas --admin
