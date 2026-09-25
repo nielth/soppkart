@@ -180,10 +180,13 @@
       center: [10.75, 59.95],
       zoom: 6,
       maxZoom: 17,
-      maxPitch: 70,
+      // Up to almost looking along the ground; MapLibre allows more, but past 85° you look at the sky.
+      maxPitch: 85,
       attributionControl: { compact: true },
     })
 
+    // For poking at the map from the browser console during development.
+    if (import.meta.env.DEV) (window as unknown as { map: maplibregl.Map }).map = map
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right')
     const geolocate = new maplibregl.GeolocateControl({
       positionOptions: { enableHighAccuracy: true },
@@ -222,6 +225,15 @@
           'Terreng: <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md">Mapzen, AWS m.fl.</a>',
       })
       map!.on('terrain', onTerrainChange)
+      // A light sky with haze towards the horizon, seen when the map is tilted far.
+      map!.setSky({
+        'sky-color': '#8cc4ec',
+        'horizon-color': '#dceefa',
+        'fog-color': '#dceefa',
+        'sky-horizon-blend': 0.6,
+        'horizon-fog-blend': 0.6,
+        'fog-ground-blend': 0.85,
+      })
       if (loadTerrain()) map!.setTerrain({ source: 'terrain', exaggeration: 1 })
 
       // NVE's steepness map, under the probability colours.
@@ -786,7 +798,7 @@
     if (!map) return
     const on = map.getTerrain() !== null
     saveTerrain(on)
-    if (on && map.getPitch() < 20) map.easeTo({ pitch: 60, duration: 800 })
+    if (on && map.getPitch() < 20) map.easeTo({ pitch: 70, duration: 800 })
     if (!on && map.getPitch() > 0) map.easeTo({ pitch: 0, duration: 800 })
   }
 
