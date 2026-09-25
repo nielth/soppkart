@@ -274,10 +274,6 @@ export function logout(): Promise<unknown> {
   return send('/api/auth/logout', 'POST')
 }
 
-export function changePassword(currentPassword: string, newPassword: string): Promise<unknown> {
-  return send('/api/auth/password', 'POST', { current_password: currentPassword, new_password: newPassword })
-}
-
 /** A user as the admin page sees it: the permissions granted (admins have all anyway). */
 export interface AdminUser {
   id: number

@@ -35,7 +35,6 @@
     type Status,
     type User,
   } from './lib/api'
-  import AccountPage from './lib/AccountPage.svelte'
   import AuthPage from './lib/AuthPage.svelte'
   import Legend from './lib/Legend.svelte'
   import NavUser from './lib/NavUser.svelte'
@@ -1076,8 +1075,6 @@
   {#key router.path}
     <AuthPage mode={router.path === '/login' ? 'login' : 'register'} ondone={afterLogin} />
   {/key}
-{:else if router.path === '/konto' && user}
-  <AccountPage {user} onloggedout={afterLogin} />
 {:else if router.path === '/brukere' && user?.is_admin}
   <UsersPage me={user} />
 {/if}

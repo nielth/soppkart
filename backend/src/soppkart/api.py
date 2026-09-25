@@ -216,20 +216,6 @@ def me(user: MaybeUser) -> dict[str, Any] | None:
     return user.as_dict() if user else None
 
 
-class NewPassword(BaseModel):
-    current_password: str = Field(min_length=1, max_length=200)
-    new_password: str = Field(min_length=8, max_length=200)
-
-
-@app.post("/api/auth/password")
-def change_password(body: NewPassword, user: LoggedIn) -> dict[str, bool]:
-    """Change your own password. Logs you out everywhere, so log in again afterwards."""
-    if auth.login(user.username, body.current_password) is None:
-        raise HTTPException(403, "Feil nåværende passord")
-    auth.update_user(user.id, password=body.new_password)
-    return {"ok": True}
-
-
 def admin_user_dict(user: User) -> dict[str, Any]:
     # The permissions granted, not everything an admin can do.
     return {

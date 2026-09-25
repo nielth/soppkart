@@ -4,7 +4,7 @@
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu'
   import * as Sidebar from '$lib/components/ui/sidebar'
   import { useSidebar } from '$lib/components/ui/sidebar'
-  import { ChevronsUpDown, KeyRound, LogIn, LogOut, UserRound, Users } from '@lucide/svelte'
+  import { ChevronsUpDown, LogIn, LogOut, UserRound, Users } from '@lucide/svelte'
   import { navigate } from './router.svelte'
 
   interface Props {
@@ -66,9 +66,8 @@
           <DropdownMenu.Separator />
           {#if user.is_admin}
             <DropdownMenu.Item onSelect={() => go('/brukere')}><Users /> Brukere</DropdownMenu.Item>
+            <DropdownMenu.Separator />
           {/if}
-          <DropdownMenu.Item onSelect={() => go('/konto')}><KeyRound /> Bytt passord</DropdownMenu.Item>
-          <DropdownMenu.Separator />
           <DropdownMenu.Item onSelect={onlogout}><LogOut /> Logg ut</DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Root>

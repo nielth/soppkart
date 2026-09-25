@@ -51,7 +51,8 @@ docker compose exec backend soppkart adduser --username thomas --admin
 ```
 
 Users are stored in `data/user/users.sqlite` (passwords hashed with scrypt; a session lasts 180
-days, and a new password logs the user out everywhere). At most 20 people can register per hour.
+days). Users can't change their own password; an admin sets a new one under Brukere, which
+logs the user out everywhere. At most 20 people can register per hour.
 
 The raw downloads (~21 GB) live in the named volume `raw`; they are only needed to rebuild the
 features. Everything the running site needs is in `SOPPKART_DATA`: `features/`, `model/`,
