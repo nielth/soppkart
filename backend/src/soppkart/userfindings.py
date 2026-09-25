@@ -51,13 +51,15 @@ def add(
     lon: float,
     accuracy_m: float | None,
     note: str | None,
+    found_at: datetime | None = None,
 ) -> dict[str, Any]:
-    found_at = datetime.now(UTC).isoformat(timespec="seconds")
+    """found_at: when it was found (default now)."""
+    found = (found_at or datetime.now(UTC)).isoformat(timespec="seconds")
     with connect() as conn:
         cur = conn.execute(
             "INSERT INTO findings (user_id, species, lat, lon, accuracy_m, found_at, note)"
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (user_id, species, lat, lon, accuracy_m, found_at, note),
+            (user_id, species, lat, lon, accuracy_m, found, note),
         )
         row_id = cur.lastrowid
     return {
@@ -67,7 +69,7 @@ def add(
         "lat": lat,
         "lon": lon,
         "accuracy_m": accuracy_m,
-        "found_at": found_at,
+        "found_at": found,
         "note": note,
     }
 

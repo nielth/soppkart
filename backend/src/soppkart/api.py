@@ -4,6 +4,7 @@ import json
 import math
 import re
 import subprocess
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -645,6 +646,9 @@ class NewFinding(BaseModel):
     # GPS accuracy in metres; None when the spot was picked on the map.
     accuracy_m: float | None = Field(default=None, ge=0)
     note: str | None = Field(default=None, max_length=500)
+    # When it was found, for findings saved on the phone without reception and sent
+    # later; None means now.
+    found_at: datetime | None = None
 
 
 def finding_feature(f: dict[str, Any], names: dict[int, str] | None = None) -> dict[str, Any]:
@@ -682,7 +686,14 @@ def add_my_finding(species: str, finding: NewFinding, user: LoggedIn) -> dict[st
     get_files(species, user)
     # A spot picked on the map is where you say it is.
     accuracy = finding.accuracy_m if finding.accuracy_m is not None else 5.0
-    added = userfindings.add(user.id, species, finding.lat, finding.lon, accuracy, finding.note)
+    found_at = finding.found_at
+    if found_at is not None:
+        found_at = found_at.astimezone(UTC) if found_at.tzinfo else found_at.replace(tzinfo=UTC)
+        if found_at > datetime.now(UTC) + timedelta(hours=1):
+            raise HTTPException(422, "found_at kan ikke være frem i tid")
+    added = userfindings.add(
+        user.id, species, finding.lat, finding.lon, accuracy, finding.note, found_at
+    )
     return finding_feature(added)
 
 

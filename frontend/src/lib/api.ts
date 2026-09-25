@@ -131,9 +131,18 @@ async function send<T>(url: string, method: string, body?: unknown): Promise<T> 
   return res.json() as Promise<T>
 }
 
-/** accuracyM is the GPS accuracy, or null for a spot picked on the map. */
-export function addMyFinding(species: string, lat: number, lon: number, accuracyM: number | null): Promise<unknown> {
-  return send(`/api/${species}/my-findings`, 'POST', { lat, lon, accuracy_m: accuracyM })
+/**
+ * accuracyM is the GPS accuracy, or null for a spot picked on the map. foundAt is when it
+ * was found, for findings saved without reception and sent later (default: now).
+ */
+export function addMyFinding(
+  species: string,
+  lat: number,
+  lon: number,
+  accuracyM: number | null,
+  foundAt?: string,
+): Promise<unknown> {
+  return send(`/api/${species}/my-findings`, 'POST', { lat, lon, accuracy_m: accuracyM, found_at: foundAt })
 }
 
 export function deleteMyFinding(id: number): Promise<unknown> {

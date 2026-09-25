@@ -57,6 +57,7 @@
   import {
     ChartColumn,
     ChevronDown,
+    CloudDownload,
     Crosshair,
     Layers,
     LogIn,
@@ -65,9 +66,26 @@
     SlidersHorizontal,
     Sparkles,
     Sprout,
+    Trash2,
     Users,
+    WifiOff,
   } from '@lucide/svelte'
   import PointPanel from './lib/PointPanel.svelte'
+  import {
+    cacheAppShell,
+    clearSavedMaps,
+    downloadTiles,
+    isNetworkError,
+    isStandalone,
+    loadPendingFindings,
+    MAX_DOWNLOAD_TILES,
+    savePendingFindings,
+    storageUsed,
+    tileUrls,
+    type DownloadProgress,
+    type PendingFinding,
+    type TileLayer,
+  } from './lib/offline'
 
   let mapEl: HTMLDivElement
   let map: maplibregl.Map | undefined
@@ -112,6 +130,13 @@
   let findingMessage = $state<string | null>(null)
   let myFindings = $state<MyFinding[]>([])
   let showMyList = $state(false)
+  // Offline use: connection state, finds waiting to be sent, and "Last ned område".
+  let online = $state(navigator.onLine)
+  let pendingFindings = $state<PendingFinding[]>(loadPendingFindings())
+  let download = $state<DownloadProgress | null>(null)
+  let downloadAbort: AbortController | null = null
+  let downloadMessage = $state<string | null>(null)
+  let storageBytes = $state<number | null>(null)
   // The sidebar's state (a sheet on phones, collapsible on wider screens).
   let sidebar = $state<ReturnType<typeof Sidebar.useSidebar>>()
   // Weight per feature group in percent (100 = the model's own weighting).
@@ -202,6 +227,7 @@
         tiles: [STEEPNESS_URL],
         tileSize: 256,
         minzoom: 9,
+        maxzoom: 16,
         attribution: 'Bratthet © <a href="https://www.nve.no/">NVE</a>',
       })
       map!.addLayer(
@@ -220,6 +246,8 @@
         tiles: [TRAILS_URL],
         tileSize: 256,
         minzoom: 8,
+        // Above this the tiles are enlarged, so downloaded areas also work zoomed all the way in.
+        maxzoom: 16,
         attribution: 'Turruter © <a href="https://www.kartverket.no/">Kartverket</a>',
       })
       map!.addLayer({ id: 'trails', type: 'raster', source: 'trails', layout: { visibility: 'none' } })
@@ -329,16 +357,27 @@
 
     loadAccess()
 
+    // Keep the app itself for offline use, once everything has loaded.
+    const saveApp = () => cacheAppShell([new URL(workerUrl, location.href).toString()])
+    if (document.readyState === 'complete') saveApp()
+    else window.addEventListener('load', saveApp, { once: true })
+    const goOnline = () => {
+      online = true
+      sendPendingFindings()
+    }
+    const goOffline = () => (online = false)
+    window.addEventListener('online', goOnline)
+    window.addEventListener('offline', goOffline)
+    refreshStorage()
+
     return () => {
       clearInterval(trainPoll)
+      window.removeEventListener('online', goOnline)
+      window.removeEventListener('offline', goOffline)
       map?.remove()
     }
   })
 
-  /**
-   * Who is logged in, and what they may see: extra layers, species and findings.
-   * Run at start and after logging in or out.
-   */
   /** Back to the map after logging in, registering or out, with what this user may see. */
   function afterLogin() {
     navigate('/')
@@ -350,6 +389,10 @@
     afterLogin()
   }
 
+  /**
+   * Who is logged in, and what they may see: extra layers, species and findings.
+   * Run at start and after logging in or out.
+   */
   async function loadAccess() {
     showMyList = false
     try {
@@ -379,6 +422,7 @@
         }
       })
       .catch((err) => (statusError = String(err)))
+    if (user) sendPendingFindings()
   }
 
   // Everything that depends on the chosen species.
@@ -443,8 +487,86 @@
             : 'Funnet er lagret.'
       refreshStatus(species)
     } catch (err) {
-      findingMessage = `Kunne ikke lagre: ${err}`
+      if (!isNetworkError(err)) {
+        findingMessage = `Kunne ikke lagre: ${err}`
+        return
+      }
+      // No reception: keep it on the phone and send it when the connection is back.
+      pendingFindings = [
+        ...pendingFindings,
+        { species, lat, lon, accuracy_m: accuracy, found_at: new Date().toISOString() },
+      ]
+      savePendingFindings(pendingFindings)
+      findingMessage = 'Uten nett: funnet er lagret på telefonen og sendes når du får nett.'
     }
+  }
+
+  /** Send findings saved without reception. Those that still fail stay for next time. */
+  async function sendPendingFindings() {
+    if (!user || !pendingFindings.length) return
+    const left: PendingFinding[] = []
+    for (const f of pendingFindings) {
+      try {
+        await addMyFinding(f.species, f.lat, f.lon, f.accuracy_m, f.found_at)
+      } catch (err) {
+        // Keep it only if the network failed; a finding the server refuses won't succeed later.
+        if (isNetworkError(err)) left.push(f)
+      }
+    }
+    const sent = pendingFindings.length - left.length
+    pendingFindings = left
+    savePendingFindings(left)
+    if (sent) {
+      findingMessage = `${sent} funn lagret uten nett er nå sendt.`
+      refreshMyFindings(species)
+      refreshStatus(species)
+    }
+  }
+
+  /**
+   * Download what the map shows now, for use without reception: the topo map, the
+   * probability colours for the chosen species and weighting, and trails, steepness and
+   * 3D terrain when they are on. Flyfoto and Strava are not downloaded (their terms don't
+   * allow it), but tiles already looked at are kept.
+   */
+  async function downloadArea() {
+    if (!map) return
+    const b = map.getBounds()
+    const layers: TileLayer[] = [{ url: TILE_BASE, minzoom: 5, maxzoom: 16 }]
+    if (showHeatmap && status?.ready) {
+      layers.push({ url: tilesUrl(species, status.model?.trained_at, threshold, wParam), minzoom: 5, maxzoom: 14 })
+    }
+    if (showTrails) layers.push({ url: TRAILS_URL, minzoom: 8, maxzoom: 16 })
+    if (showSteepness) layers.push({ url: STEEPNESS_URL, minzoom: 9, maxzoom: 16 })
+    if (map.getTerrain()) layers.push({ url: TERRAIN_URL, minzoom: 5, maxzoom: 15 })
+    const urls = tileUrls([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], layers)
+    if (urls.length > MAX_DOWNLOAD_TILES) {
+      downloadMessage = `Området er for stort (${urls.length} kartbiter). Zoom inn og prøv igjen.`
+      return
+    }
+    downloadMessage = null
+    downloadAbort = new AbortController()
+    download = { done: 0, total: urls.length, failed: 0 }
+    const result = await downloadTiles(urls, (p) => (download = p), downloadAbort.signal)
+    downloadMessage = downloadAbort.signal.aborted
+      ? 'Nedlastingen ble avbrutt. Det som ble lastet ned, er lagret.'
+      : result.failed
+        ? `Ferdig, men ${result.failed} av ${result.total} kartbiter kunne ikke lastes ned.`
+        : `Ferdig: ${result.total} kartbiter er lagret for bruk uten nett.`
+    download = null
+    downloadAbort = null
+    refreshStorage()
+  }
+
+  async function deleteSavedMaps() {
+    if (!confirm('Slette alle nedlastede kart på denne enheten?')) return
+    await clearSavedMaps()
+    downloadMessage = 'Nedlastede kart er slettet.'
+    refreshStorage()
+  }
+
+  async function refreshStorage() {
+    storageBytes = await storageUsed()
   }
 
   function showMyFinding(feature: maplibregl.MapGeoJSONFeature) {
@@ -807,7 +929,9 @@
       point = await fetchPoint(species, lat, lon, wParam)
     } catch (err) {
       point = null
-      pointError = String(err)
+      pointError = isNetworkError(err)
+        ? 'Uten nett: poengsum for et punkt krever nett. Fargene på kartet er lagret.'
+        : String(err)
     } finally {
       pointLoading = false
     }
@@ -833,6 +957,9 @@
           <span class="font-semibold">Soppkart</span>
           <span class="text-xs text-muted-foreground">Finn de beste soppstedene</span>
         </div>
+        {#if !online}
+          <Badge variant="secondary" class="ml-auto gap-1"><WifiOff class="size-3" /> Uten nett</Badge>
+        {/if}
       </div>
     </Sidebar.Header>
 
@@ -1039,6 +1166,12 @@
               <Crosshair /> Registrer funn her
             </Button>
             <p class="text-xs text-muted-foreground">Eller trykk på kartet og velg «Jeg fant … her».</p>
+            {#if pendingFindings.length}
+              <div class="flex items-center gap-2 rounded-md bg-accent px-3 py-2 text-xs">
+                <WifiOff class="size-4 shrink-0" />
+                {pendingFindings.length} funn venter på nett og sendes automatisk.
+              </div>
+            {/if}
             {#if findingMessage}
               <div class="rounded-md bg-accent px-3 py-2 text-xs">{findingMessage}</div>
             {/if}
@@ -1082,6 +1215,51 @@
               {/if}
             {/if}
           {/if}
+        </Sidebar.GroupContent>
+      </Sidebar.Group>
+
+      <Sidebar.Group>
+        <Sidebar.GroupLabel class="gap-2"><CloudDownload /> Uten nett</Sidebar.GroupLabel>
+        <Sidebar.GroupContent class="flex flex-col gap-3 px-2 pt-1">
+          <p class="text-xs text-muted-foreground">
+            Last ned det kartet viser nå (kart, sannsynlighet for valgt art, og turstier, bratthet og 3D når
+            de er på), helt inn til stinivå. Flyfoto og Strava lastes ikke ned, men det du har sett, huskes.
+          </p>
+          {#if download}
+            <div class="flex flex-col gap-1.5">
+              <div class="h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  class="h-full rounded-full bg-primary transition-[width]"
+                  style:width="{(download.done / Math.max(1, download.total)) * 100}%"
+                ></div>
+              </div>
+              <div class="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{download.done} / {download.total} kartbiter</span>
+                <Button variant="ghost" size="sm" class="h-6 px-2" onclick={() => downloadAbort?.abort()}>Avbryt</Button>
+              </div>
+            </div>
+          {:else}
+            <Button variant="outline" disabled={!online} onclick={downloadArea}>
+              <CloudDownload /> Last ned området på kartet
+            </Button>
+          {/if}
+          {#if downloadMessage}
+            <div class="rounded-md bg-accent px-3 py-2 text-xs">{downloadMessage}</div>
+          {/if}
+          {#if !isStandalone()}
+            <p class="text-xs text-muted-foreground">
+              Tips: legg Soppkart til på Hjem-skjerm (Del → Legg til på Hjem-skjerm). Ellers kan Safari slette
+              nedlastede kart etter en uke uten bruk.
+            </p>
+          {/if}
+          <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>
+              {#if storageBytes !== null}Lagret på enheten: {(storageBytes / 1e6).toFixed(0)} MB{/if}
+            </span>
+            <Button variant="ghost" size="sm" class="h-7 px-2 text-destructive" onclick={deleteSavedMaps}>
+              <Trash2 /> Slett
+            </Button>
+          </div>
         </Sidebar.GroupContent>
       </Sidebar.Group>
 
