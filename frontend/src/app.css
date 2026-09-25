@@ -137,7 +137,7 @@ body,
 /* The map's own controls stay in the visible part: clear of the notch at the top,
    and above Safari's toolbar (the difference between 100lvh and 100dvh) at the bottom. */
 .maplibregl-map .maplibregl-ctrl-top-right {
-  top: env(safe-area-inset-top);
+  top: calc(env(safe-area-inset-top) + 2px);
 }
 
 .maplibregl-map .maplibregl-ctrl-bottom-left,

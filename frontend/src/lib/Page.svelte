@@ -10,7 +10,7 @@
 <!-- A full-screen page over the map, with a way back to it. -->
 <div class="fixed inset-0 z-50 overflow-y-auto bg-background">
   <div
-    class="mx-auto flex min-h-full w-full flex-col gap-6 px-4 pt-[max(16px,env(safe-area-inset-top))] pb-10 {wide
+    class="mx-auto flex min-h-full w-full flex-col gap-6 px-4 pt-[calc(env(safe-area-inset-top)+16px)] pb-10 {wide
       ? 'max-w-2xl'
       : 'max-w-sm'}"
   >

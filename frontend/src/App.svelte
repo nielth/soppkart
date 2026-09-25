@@ -756,7 +756,7 @@
   <SidebarBridge bind:sidebar />
   <Sidebar.Root>
     <Sidebar.Header>
-      <div class="flex h-12 items-center gap-2 px-2 pt-[env(safe-area-inset-top)]">
+      <div class="flex min-h-12 items-center gap-2 px-2 pt-[env(safe-area-inset-top)]">
         <span class="text-2xl">🍄</span>
         <div class="grid leading-tight">
           <span class="font-semibold">Soppkart</span>
@@ -1053,7 +1053,7 @@
     <Sidebar.Trigger
       variant="secondary"
       size="icon"
-      class="absolute top-[max(12px,env(safe-area-inset-top))] left-3 z-10 size-10 shadow-lg"
+      class="absolute top-[calc(env(safe-area-inset-top)+12px)] left-3 z-10 size-10 shadow-lg"
       aria-label="Meny"
     />
     {#if point || pointLoading || pointError}
