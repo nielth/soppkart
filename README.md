@@ -100,10 +100,10 @@ whatever the resolution.
   with NVE's steepness map (the one used for avalanche terrain).
 - **Uten nett (offline):** the app keeps itself and the map tiles you look at, so it opens and
   shows those areas without reception. "Last ned området på kartet" downloads everything the map
-  shows now (topo map, probability colours for the chosen species and weighting, and trails,
-  steepness and 3D terrain when on) down to path level; up to 8000 tiles at a time. Flyfoto and
-  Strava are not downloaded (their terms don't allow it), only kept as you look at them. Finds
-  registered without reception wait on the phone and are sent when the connection is back.
+  shows now (topo map, probability colours for the chosen species and weighting, and flyfoto,
+  trails, steepness, Strava and 3D terrain when on) down to the closest zoom; up to 8000 tiles at a
+  time. (Flyfoto and Strava are included since this is a private site, like the Redis cache.)
+  Finds registered without reception wait on the phone and are sent when the connection is back.
   Tapping for a score needs a connection. On iPhone, add the site to the home screen, or Safari
   may delete the saved maps after a week without use.
 - **Registrerte funn:** "Vis registrerte funn" (on by default) shows the GBIF/Artsdatabanken findings the model

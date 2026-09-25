@@ -120,7 +120,8 @@ export async function downloadTiles(
       const key = cacheKey(url)
       try {
         if (!(await cache.match(key, { ignoreVary: true }))) {
-          const response = await fetch(url, { signal, credentials: 'same-origin' })
+          // no-store: the service worker then leaves it to us, instead of also keeping a copy.
+          const response = await fetch(url, { signal, credentials: 'same-origin', cache: 'no-store' })
           if (response.ok) await cache.put(key, response)
           else progress.failed++
         }

@@ -60,7 +60,8 @@ async function tile(request) {
   const hit = await caches.match(key, { ignoreVary: true })
   if (hit) return hit
   const response = await fetch(request)
-  if (response.ok) {
+  // "Last ned område" fetches with cache: 'no-store' and saves the tile itself.
+  if (response.ok && request.cache !== 'no-store') {
     const cache = await caches.open(SEEN_CACHE)
     await cache.put(key, response.clone())
     trim(cache)

@@ -347,6 +347,7 @@
 
       mapLoaded = true
       geolocate.trigger()
+      fixStandaloneLayout()
     })
 
     geolocate.on('geolocate', (e) => {
@@ -525,20 +526,22 @@
 
   /**
    * Download what the map shows now, for use without reception: the topo map, the
-   * probability colours for the chosen species and weighting, and trails, steepness and
-   * 3D terrain when they are on. Flyfoto and Strava are not downloaded (their terms don't
-   * allow it), but tiles already looked at are kept.
+   * probability colours for the chosen species and weighting, and flyfoto, trails,
+   * steepness, Strava and 3D terrain when they are on. Map and flyfoto go to the map's
+   * closest zoom (17).
    */
   async function downloadArea() {
     if (!map) return
     const b = map.getBounds()
-    const layers: TileLayer[] = [{ url: TILE_BASE, minzoom: 5, maxzoom: 16 }]
+    const layers: TileLayer[] = [{ url: TILE_BASE, minzoom: 5, maxzoom: 17 }]
+    if (basemap === 'flyfoto' && imageryAvailable) layers.push({ url: IMAGERY_URL, minzoom: 5, maxzoom: 17 })
     if (showHeatmap && status?.ready) {
       layers.push({ url: tilesUrl(species, status.model?.trained_at, threshold, wParam), minzoom: 5, maxzoom: 14 })
     }
     if (showTrails) layers.push({ url: TRAILS_URL, minzoom: 8, maxzoom: 16 })
     if (showSteepness) layers.push({ url: STEEPNESS_URL, minzoom: 9, maxzoom: 16 })
     if (map.getTerrain()) layers.push({ url: TERRAIN_URL, minzoom: 5, maxzoom: 15 })
+    if (showStravaHeat && stravaAvailable) layers.push({ url: stravaTilesUrl(stravaActivity), minzoom: 5, maxzoom: 15 })
     const urls = tileUrls([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], layers)
     if (urls.length > MAX_DOWNLOAD_TILES) {
       downloadMessage = `Området er for stort (${urls.length} kartbiter). Zoom inn og prøv igjen.`
@@ -726,6 +729,26 @@
       },
       above,
     )
+  }
+
+  /**
+   * iPhone home screen apps can start laid out as if the status bar weren't drawn over,
+   * leaving a black band at the top until something re-lays out the page (like opening
+   * the login page). Re-measure shortly after start and whenever the app comes back.
+   */
+  function fixStandaloneLayout() {
+    if (!isStandalone()) return
+    const relayout = () => {
+      window.scrollTo(0, 0)
+      document.documentElement.style.minHeight = '100.01%'
+      requestAnimationFrame(() => {
+        document.documentElement.style.minHeight = ''
+        map?.resize()
+      })
+    }
+    setTimeout(relayout, 300)
+    window.addEventListener('pageshow', relayout)
+    document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && relayout())
   }
 
   /** Tilt the map when 3D is switched on, and flatten it again when switched off. */
@@ -1222,8 +1245,8 @@
         <Sidebar.GroupLabel class="gap-2"><CloudDownload /> Uten nett</Sidebar.GroupLabel>
         <Sidebar.GroupContent class="flex flex-col gap-3 px-2 pt-1">
           <p class="text-xs text-muted-foreground">
-            Last ned det kartet viser nå (kart, sannsynlighet for valgt art, og turstier, bratthet og 3D når
-            de er på), helt inn til stinivå. Flyfoto og Strava lastes ikke ned, men det du har sett, huskes.
+            Last ned det kartet viser nå (kart, sannsynlighet for valgt art, og flyfoto, turstier, bratthet,
+            Strava og 3D når de er på), helt inn til stinivå. Det du ser på kartet, huskes også.
           </p>
           {#if download}
             <div class="flex flex-col gap-1.5">
@@ -1310,7 +1333,7 @@
     <!-- The map is as tall as the whole screen (100lvh), reaching behind Safari's toolbars
          on iPhone; everything else stays in the visible part. The map element itself is
          h-full/w-full inside a wrapper, since MapLibre's CSS sets it to position: relative. -->
-    <div class="absolute inset-x-0 top-0 h-lvh">
+    <div class="absolute inset-x-0 top-0 h-[max(100%,100lvh)]">
       <div class="h-full w-full" bind:this={mapEl}></div>
     </div>
     <Sidebar.Trigger
