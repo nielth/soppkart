@@ -50,6 +50,8 @@ export interface PointInfo {
   score: number | null
   groups?: GroupContribution[]
   features: FeatureValue[]
+  /** Computed on the phone from a downloaded area (no reception). */
+  offline?: boolean
 }
 
 /** The backend's error message ({"detail": "..."}), or the status and body. */

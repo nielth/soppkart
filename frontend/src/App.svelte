@@ -74,11 +74,14 @@
   import {
     cacheAppShell,
     clearSavedMaps,
+    downloadAreaData,
     downloadTiles,
     isNetworkError,
     isStandalone,
     loadPendingFindings,
     MAX_DOWNLOAD_TILES,
+    offlinePoint,
+    offlineRoutes,
     savePendingFindings,
     storageUsed,
     tileUrls,
@@ -525,37 +528,64 @@
   }
 
   /**
-   * Download what the map shows now, for use without reception: the topo map, the
-   * probability colours for the chosen species and weighting, and flyfoto, trails,
-   * steepness, Strava and 3D terrain when they are on. Map and flyfoto go to the map's
-   * closest zoom (17).
+   * Download the area on the screen for use without reception, from the zoom now and all
+   * the way in (nothing outside the screen): the topo map, the probability colours for the
+   * chosen species and weighting, flyfoto, trails, steepness, Strava and 3D terrain when
+   * they are on, and the data for tapping: score, factors and nature data for every
+   * square, and route info.
    */
   async function downloadArea() {
     if (!map) return
     const b = map.getBounds()
-    const layers: TileLayer[] = [{ url: TILE_BASE, minzoom: 5, maxzoom: 17 }]
-    if (basemap === 'flyfoto' && imageryAvailable) layers.push({ url: IMAGERY_URL, minzoom: 5, maxzoom: 17 })
-    if (showHeatmap && status?.ready) {
-      layers.push({ url: tilesUrl(species, status.model?.trained_at, threshold, wParam), minzoom: 5, maxzoom: 14 })
+    const bounds: [number, number, number, number] = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]
+    const layers: TileLayer[] = [{ url: TILE_BASE, minzoom: 5, maxzoom: 17, kbPerTile: 20 }]
+    if (basemap === 'flyfoto' && imageryAvailable) {
+      layers.push({ url: IMAGERY_URL, minzoom: 5, maxzoom: 17, kbPerTile: 40 })
     }
-    if (showTrails) layers.push({ url: TRAILS_URL, minzoom: 8, maxzoom: 16 })
-    if (showSteepness) layers.push({ url: STEEPNESS_URL, minzoom: 9, maxzoom: 16 })
-    if (map.getTerrain()) layers.push({ url: TERRAIN_URL, minzoom: 5, maxzoom: 15 })
-    if (showStravaHeat && stravaAvailable) layers.push({ url: stravaTilesUrl(stravaActivity), minzoom: 5, maxzoom: 15 })
-    const urls = tileUrls([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], layers)
+    if (showHeatmap && status?.ready) {
+      const url = tilesUrl(species, status.model?.trained_at, threshold, wParam)
+      layers.push({ url, minzoom: 3, maxzoom: 14, kbPerTile: 3 })
+    }
+    if (showTrails) layers.push({ url: TRAILS_URL, minzoom: 8, maxzoom: 16, kbPerTile: 2 })
+    if (showSteepness) layers.push({ url: STEEPNESS_URL, minzoom: 9, maxzoom: 16, kbPerTile: 4 })
+    if (map.getTerrain()) layers.push({ url: TERRAIN_URL, minzoom: 5, maxzoom: 15, zoomOffset: -2, kbPerTile: 90 })
+    if (showStravaHeat && stravaAvailable) {
+      layers.push({ url: stravaTilesUrl(stravaActivity), minzoom: 5, maxzoom: 15, zoomOffset: -1, kbPerTile: 10 })
+    }
+    const { urls, mb } = tileUrls(bounds, layers, map.getZoom())
     if (urls.length > MAX_DOWNLOAD_TILES) {
       downloadMessage = `Området er for stort (${urls.length} kartbiter). Zoom inn og prøv igjen.`
       return
     }
+    const question =
+      `Laste ned området på skjermen, fra denne zoomen og helt inn?\n\n` +
+      `${urls.length} kartbiter, ca. ${Math.max(1, Math.round(mb))} MB, pluss punktinfo.`
+    if (!confirm(question)) return
+
     downloadMessage = null
     downloadAbort = new AbortController()
     download = { done: 0, total: urls.length, failed: 0 }
+    const notes: string[] = []
+    // Data for tapping the map: score, factors and nature data, and route info.
+    try {
+      await downloadAreaData('points', species, bounds)
+    } catch (err) {
+      notes.push(`Punktinfo ble ikke lastet ned: ${err instanceof Error ? err.message : err}.`)
+    }
+    if (showTrails) {
+      try {
+        await downloadAreaData('trails', undefined, bounds)
+      } catch {
+        notes.push('Ruteinfo ble ikke lastet ned.')
+      }
+    }
     const result = await downloadTiles(urls, (p) => (download = p), downloadAbort.signal)
     downloadMessage = downloadAbort.signal.aborted
       ? 'Nedlastingen ble avbrutt. Det som ble lastet ned, er lagret.'
       : result.failed
-        ? `Ferdig, men ${result.failed} av ${result.total} kartbiter kunne ikke lastes ned.`
-        : `Ferdig: ${result.total} kartbiter er lagret for bruk uten nett.`
+        ? `Ferdig, men ${result.failed} av ${result.total} kartbiter kunne ikke lastes ned. Trykk igjen for å hente resten.`
+        : `Ferdig: området er lagret for bruk uten nett (${result.total} kartbiter).`
+    if (notes.length) downloadMessage += ` ${notes.join(' ')}`
     download = null
     downloadAbort = null
     refreshStorage()
@@ -937,12 +967,16 @@
     // Only at hiking zoom, where single routes can be told apart.
     if (!showTrails || !map || map.getZoom() < 11) return
     const metresPerPixel = (156_543 * Math.cos((lat * Math.PI) / 180)) / 2 ** map.getZoom()
+    const toleranceM = Math.max(10, 12 * metresPerPixel)
+    let found: TrailRoute[] | null = null
     try {
-      const found = await fetchTrails(lat, lon, Math.max(10, 12 * metresPerPixel))
-      if (selected?.lat === lat && selected?.lon === lon) routes = found
-    } catch {
-      // Route info is a bonus; the score panel works without it.
+      found = await fetchTrails(lat, lon, toleranceM)
+    } catch (err) {
+      // Without reception, use the routes of a downloaded area. Route info is a bonus;
+      // the score panel works without it.
+      if (isNetworkError(err)) found = await offlineRoutes(lat, lon, toleranceM).catch(() => null)
     }
+    if (found && selected?.lat === lat && selected?.lon === lon) routes = found
   }
 
   async function loadPoint(lat: number, lon: number) {
@@ -952,9 +986,14 @@
       point = await fetchPoint(species, lat, lon, wParam)
     } catch (err) {
       point = null
-      pointError = isNetworkError(err)
-        ? 'Uten nett: poengsum for et punkt krever nett. Fargene på kartet er lagret.'
-        : String(err)
+      if (!isNetworkError(err)) {
+        pointError = String(err)
+        return
+      }
+      // Without reception: compute it from a downloaded area, if there is one here.
+      const weights = wParam ? wParam.split(',').map(Number) : null
+      point = await offlinePoint(species, lat, lon, weights).catch(() => null)
+      if (!point) pointError = 'Uten nett, og dette stedet er ikke lastet ned. Last ned området når du har nett.'
     } finally {
       pointLoading = false
     }
@@ -1245,8 +1284,9 @@
         <Sidebar.GroupLabel class="gap-2"><CloudDownload /> Uten nett</Sidebar.GroupLabel>
         <Sidebar.GroupContent class="flex flex-col gap-3 px-2 pt-1">
           <p class="text-xs text-muted-foreground">
-            Last ned det kartet viser nå (kart, sannsynlighet for valgt art, og flyfoto, turstier, bratthet,
-            Strava og 3D når de er på), helt inn til stinivå. Det du ser på kartet, huskes også.
+            Last ned området på skjermen, fra zoomen nå og helt inn: kart, sannsynlighet for valgt art,
+            poengsum og info når du trykker på kartet, og flyfoto, turstier, bratthet, Strava og 3D når de er
+            på. Det du ser på kartet, huskes også.
           </p>
           {#if download}
             <div class="flex flex-col gap-1.5">

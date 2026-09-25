@@ -99,13 +99,16 @@ whatever the resolution.
   fingers (or right-drag / ctrl-drag on a computer). "Bratthet (NVE)" colours slopes from 27° up
   with NVE's steepness map (the one used for avalanche terrain).
 - **Uten nett (offline):** the app keeps itself and the map tiles you look at, so it opens and
-  shows those areas without reception. "Last ned området på kartet" downloads everything the map
-  shows now (topo map, probability colours for the chosen species and weighting, and flyfoto,
-  trails, steepness, Strava and 3D terrain when on) down to the closest zoom; up to 8000 tiles at a
-  time. (Flyfoto and Strava are included since this is a private site, like the Redis cache.)
-  Finds registered without reception wait on the phone and are sent when the connection is back.
-  Tapping for a score needs a connection. On iPhone, add the site to the home screen, or Safari
-  may delete the saved maps after a week without use.
+  shows those areas without reception. "Last ned området på kartet" downloads exactly the area on
+  the screen, from the zoom you're at and all the way in (nothing coarser, which would reach
+  outside it): the topo map, probability colours for the chosen species and weighting, and
+  flyfoto, trails, steepness, Strava and 3D terrain when on. It first shows the number of tiles
+  and an estimated size. It also downloads what tapping the map needs: score, factor groups and
+  nature data for every 32 m square (`/api/{species}/area`, up to ~16 × 16 km; the phone computes
+  the percentile from a sample of the background, within about 0.3 points of the server) and the
+  routes (`/api/trails/area`, from Kartverket's Turrutebasen WFS). Finds registered without
+  reception wait on the phone and are sent when the connection is back. On iPhone, add the site
+  to the home screen, or Safari may delete the saved maps after a week without use.
 - **Registrerte funn:** "Vis registrerte funn" (on by default) shows the GBIF/Artsdatabanken findings the model
   learned from; tap a point for its details (year, precision, type) and a link to GBIF.
 - **Your own finds** (logged in): "📍 Registrer funn her" saves your GPS position (only positions

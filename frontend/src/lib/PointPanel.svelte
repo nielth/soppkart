@@ -91,7 +91,9 @@
           </div>
         </div>
       {/if}
-      <span class="text-[11px] text-muted-foreground tabular-nums">{point.lat.toFixed(5)}, {point.lon.toFixed(5)}</span>
+      <span class="text-[11px] text-muted-foreground tabular-nums">
+        {point.lat.toFixed(5)}, {point.lon.toFixed(5)}{#if point.offline}&nbsp;· uten nett, fra nedlastet område{/if}
+      </span>
     </Card.Header>
 
     <Card.Content class="flex flex-col gap-3 px-4">

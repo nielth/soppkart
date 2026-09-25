@@ -1,5 +1,6 @@
 """FastAPI app serving score tiles, point lookups and findings per species."""
 
+import base64
 import json
 import math
 import re
@@ -18,6 +19,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from pyproj import Transformer
+from rasterio.windows import Window
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.io import Reader
 from rio_tiler.utils import render
@@ -488,6 +490,101 @@ async def trails(
     return routes
 
 
+TRAILS_WFS = "https://wfs.geonorge.no/skwms1/wfs.turogfriluftsruter"
+WFS_TRAIL_TYPES = {
+    "Fotrute": "Fotrute",
+    "Skiløype": "Skiløype",
+    "Sykkelrute": "Sykkelrute",
+    "AnnenRute": "Annen rute",
+}
+# The WFS's field names (the WMS adds _d to decoded ones), with the same labels as /api/trails.
+WFS_TRAIL_FIELDS = {
+    "rutenavn": "Navn",
+    "rutenummer": "Rutenummer",
+    "vedlikeholdsansvarlig": "Vedlikeholdes av",
+    "merking": "Merking",
+    "gradering": "Gradering",
+    "belysning": "Belysning",
+}
+# The WFS gives codes where the WMS gives text; only the codes we know are shown.
+WFS_CODES = {
+    "merking": {"JA": "Merket", "NEI": "Umerket", "SM": "Sesongmerket"},
+    "gradering": {
+        "G": "Enkel (grønn)",
+        "B": "Middels (blå)",
+        "R": "Krevende (rød)",
+        "S": "Ekspert (svart)",
+    },
+    "belysning": {"true": "Ja"},
+}
+GML = "{http://www.opengis.net/gml/3.2}"
+MAX_TRAIL_FEATURES = 5000
+
+
+def local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def trail_fields(feature: ElementTree.Element) -> list[dict[str, str]]:
+    """The route's fields, with the same labels as /api/trails."""
+    fields = []
+    for element in feature.iter():
+        name = local_name(element.tag)
+        text = (element.text or "").strip()
+        if not text or name not in WFS_TRAIL_FIELDS or text == "Ukjent":
+            continue
+        if name in WFS_CODES:
+            text = WFS_CODES[name].get(text, "")
+        if text:
+            fields.append({"label": WFS_TRAIL_FIELDS[name], "value": text})
+    return fields
+
+
+@app.get("/api/trails/area")
+async def trails_area(
+    west: float = Query(ge=-180, le=180),
+    south: float = Query(ge=-90, le=90),
+    east: float = Query(ge=-180, le=180),
+    north: float = Query(ge=-90, le=90),
+) -> dict[str, Any]:
+    """Kartverket's routes in an area as GeoJSON lines, for route info without reception."""
+    global _trails_client
+    if _trails_client is None:
+        _trails_client = httpx.AsyncClient(timeout=15)
+    out: list[dict[str, Any]] = []
+    for type_name, kind in WFS_TRAIL_TYPES.items():
+        res = await _trails_client.get(
+            TRAILS_WFS,
+            params={
+                "service": "WFS",
+                "version": "2.0.0",
+                "request": "GetFeature",
+                "typeNames": f"app:{type_name}",
+                "count": str(MAX_TRAIL_FEATURES),
+                # EPSG:4326 in WFS 2.0 is latitude first.
+                "bbox": f"{south},{west},{north},{east},urn:ogc:def:crs:EPSG::4326",
+            },
+        )
+        if res.status_code != 200:
+            raise HTTPException(502, f"Kartverket svarte {res.status_code}")
+        for member in ElementTree.fromstring(res.content):
+            for feature in member:
+                lines = []
+                for pos_list in feature.iter(f"{GML}posList"):
+                    values = [float(v) for v in (pos_list.text or "").split()]
+                    # EPSG:4258 is latitude first too.
+                    lines.append([[values[i + 1], values[i]] for i in range(0, len(values) - 1, 2)])
+                if lines:
+                    out.append(
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "MultiLineString", "coordinates": lines},
+                            "properties": {"type": kind, "fields": trail_fields(feature)},
+                        }
+                    )
+    return {"type": "FeatureCollection", "features": out}
+
+
 @app.get("/api/species")
 def species_list(user: MaybeUser) -> list[dict[str, Any]]:
     """The species this user can see."""
@@ -629,6 +726,73 @@ def point(
             }
             for f, v in zip(features.FEATURES, values, strict=True)
         ],
+    }
+
+
+# Largest area for offline point data (~16 x 16 km at 32 m), and how many rows of the
+# background sample to send for computing percentiles on the phone.
+MAX_AREA_CELLS = 250_000
+OFFLINE_REFERENCE_ROWS = 10_000
+
+
+def b64(array: np.ndarray) -> str:
+    return base64.b64encode(np.ascontiguousarray(array).tobytes()).decode()
+
+
+@app.get("/api/{species}/area")
+def area(
+    species: str,
+    user: MaybeUser,
+    west: float = Query(ge=-180, le=180),
+    south: float = Query(ge=-90, le=90),
+    east: float = Query(ge=-180, le=180),
+    north: float = Query(ge=-90, le=90),
+) -> dict[str, Any]:
+    """Everything /point needs for every square in an area, so the phone can show the
+    score, factor groups and nature data without reception (see frontend offline.ts).
+
+    Arrays are base64 of raw little-endian data in row-major order: steps int8
+    [groups, h, w], features float16 [features, h, w], land uint8 [h, w], reference
+    float32 [rows, groups] (a sample of the background's group contributions).
+    """
+    files = get_files(species, user)
+    if not is_ready(files):
+        raise HTTPException(503, "Modellen er ikke trent ennå")
+    xs, ys = TO_GRID.transform([west, east, west, east], [south, south, north, north])
+    with rasterio.open(features.FEATURES_PATH) as fsrc:
+        res = fsrc.transform.a
+        col0 = max(0, math.floor((min(xs) - fsrc.transform.c) / res))
+        col1 = min(fsrc.width, math.ceil((max(xs) - fsrc.transform.c) / res))
+        row0 = max(0, math.floor((fsrc.transform.f - max(ys)) / res))
+        row1 = min(fsrc.height, math.ceil((fsrc.transform.f - min(ys)) / res))
+        if col1 <= col0 or row1 <= row0:
+            raise HTTPException(404, "Området er utenfor kartet")
+        if (col1 - col0) * (row1 - row0) > MAX_AREA_CELLS:
+            raise HTTPException(413, "Området er for stort for punktinfo uten nett")
+        window = Window(col0, row0, col1 - col0, row1 - row0)  # type: ignore[call-arg]
+        feats = fsrc.read(window=window).astype(np.float16)
+        x0 = fsrc.transform.c + col0 * res
+        y0 = fsrc.transform.f - row0 * res
+    with rasterio.open(files.contrib) as csrc:
+        steps = csrc.read(window=window)
+    with rasterio.open(features.LAND_PATH) as lsrc:
+        land = lsrc.read(1, window=window)
+    bias, contribs = load_reference(files.reference, files.reference.stat().st_mtime)
+    step = max(1, math.ceil(len(contribs) / OFFLINE_REFERENCE_ROWS))
+    return {
+        "species": species,
+        "trained_at": meta(files)["trained_at"],
+        "grid": {"x0": x0, "y0": y0, "res": res, "width": col1 - col0, "height": row1 - row0},
+        "groups": [{"key": k, "label": label} for k, label, _ in features.FEATURE_GROUPS],
+        "features": [{"key": f.key, "label": f.label, "unit": f.unit} for f in features.FEATURES],
+        "soil_names": features.SOIL_NAMES,
+        "scale": CONTRIB_SCALE,
+        "nodata": CONTRIB_NODATA,
+        "bias": bias,
+        "steps": b64(steps.astype(np.int8)),
+        "values": b64(feats.astype("<f2")),
+        "land": b64(land.astype(np.uint8)),
+        "reference": b64(contribs[::step].astype("<f4")),
     }
 
 
