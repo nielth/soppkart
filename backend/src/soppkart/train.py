@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import polars as pl
@@ -70,6 +70,11 @@ class ModelFiles:
     @property
     def findings(self) -> Path:
         return self.dir / "findings.geojson"
+
+    @property
+    def training(self) -> Path:
+        """The latest training run: when it started and finished and whether it worked."""
+        return self.dir / "training.json"
 
 
 def model_files(species_key: str) -> ModelFiles:
@@ -231,10 +236,41 @@ def collect_training_data(
     return X[keep], y[keep], rows[keep], cols[keep]
 
 
+def now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def write_json(path: Path, data: dict[str, Any]) -> None:
+    """Write via a temporary file, so readers never see half a file."""
+    tmp = path.with_suffix(".tmp.json")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    tmp.replace(path)
+
+
 def train(species: config.Species) -> None:
-    grid = Grid.norway()
+    """Train the species' model and record the run in training.json (see ModelFiles)."""
     files = model_files(species.key)
     files.dir.mkdir(parents=True, exist_ok=True)
+    started = now_iso()
+    write_json(files.training, {"state": "running", "started_at": started})
+    try:
+        _train(species, files)
+    except BaseException as err:
+        write_json(
+            files.training,
+            {
+                "state": "failed",
+                "started_at": started,
+                "finished_at": now_iso(),
+                "error": f"{type(err).__name__}: {err}",
+            },
+        )
+        raise
+    write_json(files.training, {"state": "ok", "started_at": started, "finished_at": now_iso()})
+
+
+def _train(species: config.Species, files: ModelFiles) -> None:
+    grid = Grid.norway()
     log.info("training %s", species.name)
 
     findings = load_findings(grid, species)
@@ -243,13 +279,11 @@ def train(species: config.Species) -> None:
         & (pl.col("uncertainty_m") <= config.FINDINGS_MAX_UNCERTAINTY_M)
     )
     positives = precise.select("row", "col").unique(maintain_order=True)
-    n_own = int((precise["source"] == "own").sum())
     log.info(
-        "%d findings, %d located within %d m (%d of them your own), in %d cells",
+        "%d findings, %d located within %d m, in %d cells",
         findings.height,
         precise.height,
         config.FINDINGS_MAX_UNCERTAINTY_M,
-        n_own,
         positives.height,
     )
 
@@ -258,8 +292,27 @@ def train(species: config.Species) -> None:
     n_pos, n_bg = int(y.sum()), int((y == 0).sum())
     log.info("training on %d presence and %d background cells", n_pos, n_bg)
 
-    # Cells with one of your own findings weigh more.
-    own_cells = set(precise.filter(pl.col("source") == "own").select("row", "col").iter_rows())
+    # Own findings are used if they are precise and in the habitat (only those
+    # cells are among the presence cells). Their cells weigh more.
+    presence_cells = set(zip(rows[y == 1].tolist(), cols[y == 1].tolist(), strict=True))
+    own = findings.filter(pl.col("source") == "own")
+    own_used: list[int] = []
+    own_skipped: list[int] = []
+    for finding_id, uncertainty, r, c in own.select(
+        "id", "uncertainty_m", "row", "col"
+    ).iter_rows():
+        precise_enough = (
+            uncertainty is not None and uncertainty <= config.FINDINGS_MAX_UNCERTAINTY_M
+        )
+        used = precise_enough and (r, c) in presence_cells
+        (own_used if used else own_skipped).append(finding_id)
+    n_own = len(own_used)
+    log.info(
+        "%d of %d own findings used (the rest are imprecise or outside the habitat)",
+        n_own,
+        own.height,
+    )
+    own_cells = set(own.filter(pl.col("id").is_in(own_used)).select("row", "col").iter_rows())
     is_own = np.array([(r, c) in own_cells for r, c in zip(rows, cols, strict=True)]) & (y == 1)
     weight = np.where(is_own, config.OWN_FINDING_WEIGHT, 1.0)
 
@@ -298,7 +351,7 @@ def train(species: config.Species) -> None:
         FEATURE_KEYS[i]: round(importance.get(name, 0.0) / total, 4) for i, name in enumerate(names)
     }
     meta = {
-        "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "trained_at": now_iso(),
         "resolution_m": grid.res,
         "species": species.key,
         "name": species.name,
@@ -306,6 +359,10 @@ def train(species: config.Species) -> None:
         "n_findings": findings.height,
         "n_findings_used": precise.height,
         "n_own_findings_used": n_own,
+        # Ids of the trusted users' findings this model saw, so the map can tell
+        # which findings came after it.
+        "own_finding_ids_used": own_used,
+        "own_finding_ids_skipped": own_skipped,
         "findings_max_uncertainty_m": config.FINDINGS_MAX_UNCERTAINTY_M,
         "n_presence_cells": n_pos,
         "n_background_cells": n_bg,
@@ -324,9 +381,7 @@ def train(species: config.Species) -> None:
     }
     write_findings_geojson(files.findings, findings.filter(pl.col("source") == "gbif"))
     # Meta last: its training time tells the map that a new version is ready.
-    tmp_meta = files.meta.with_suffix(".tmp.json")
-    tmp_meta.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
-    tmp_meta.replace(files.meta)
+    write_json(files.meta, meta)
     log.info("done: %s", json.dumps(feature_importance))
 
 

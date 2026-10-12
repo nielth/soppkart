@@ -57,6 +57,7 @@
   import {
     ChartColumn,
     ChevronDown,
+    CircleCheck,
     CloudDownload,
     Crosshair,
     Layers,
@@ -75,6 +76,7 @@
     cacheAppShell,
     clearSavedMaps,
     downloadAreaData,
+    downloadedModelVersions,
     downloadTiles,
     isNetworkError,
     isStandalone,
@@ -140,6 +142,8 @@
   let downloadAbort: AbortController | null = null
   let downloadMessage = $state<string | null>(null)
   let storageBytes = $state<number | null>(null)
+  // How many of the species' downloaded areas are from an older model than the one shown.
+  let staleDownloads = $state(0)
   // The sidebar's state (a sheet on phones, collapsible on wider screens).
   let sidebar = $state<ReturnType<typeof Sidebar.useSidebar>>()
   // Weight per feature group in percent (100 = the model's own weighting).
@@ -479,7 +483,10 @@
     fetchStatus(key)
       .then((s) => {
         if (key !== species) return
+        const finished = status?.training && !s.training
         status = s
+        if (finished) findingMessage = trainingDoneMessage(s)
+        refreshStaleDownloads(key, s)
         updateTiles(key, s.model?.trained_at, threshold, weightsParam(s.model?.groups ?? [], weightsPct))
         // While a retrain runs, check back until the new model is in place.
         clearInterval(trainPoll)
@@ -488,6 +495,24 @@
       .catch((err) => {
         if (key === species) statusError = String(err)
       })
+  }
+
+  function trainingDoneMessage(s: Status): string {
+    const run = s.last_training
+    if (run?.state === 'failed') return `Treningen feilet: ${run.error ?? 'ukjent feil'}`
+    if (!s.model) return 'Treningen er ferdig.'
+    const own = s.my_findings_used ?? s.model.n_own_findings_used ?? 0
+    return `Ferdig trent ${formatFoundAt(s.model.trained_at)}. Kartet viser nå modellen med ${own} av dine funn.`
+  }
+
+  function refreshStaleDownloads(key: string, s: Status) {
+    const current = s.model?.trained_at
+    if (!current) return
+    downloadedModelVersions(key)
+      .then((versions) => {
+        if (key === species) staleDownloads = versions.filter((v) => v < current).length
+      })
+      .catch(() => {})
   }
 
   async function registerFinding(lat: number, lon: number, accuracy: number | null) {
@@ -601,12 +626,14 @@
     download = null
     downloadAbort = null
     refreshStorage()
+    if (status) refreshStaleDownloads(species, status)
   }
 
   async function deleteSavedMaps() {
     if (!confirm('Slette alle nedlastede kart på denne enheten?')) return
     await clearSavedMaps()
     downloadMessage = 'Nedlastede kart er slettet.'
+    staleDownloads = 0
     refreshStorage()
   }
 
@@ -1281,8 +1308,35 @@
 
             {#if canTrain}
               {#if status?.training}
-                <div class="rounded-md bg-accent px-3 py-2 text-xs">Trener modellen… (noen minutter)</div>
+                <div class="rounded-md bg-accent px-3 py-2 text-xs">
+                  Trener modellen…{#if status.last_training?.state === 'running'} startet
+                    {formatFoundAt(status.last_training.started_at)}{/if}. Det tar 20–30 minutter; kartet bytter
+                  selv til den nye modellen når den er ferdig.
+                </div>
               {:else}
+                {#if status?.last_training?.state === 'failed'}
+                  <div class="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    Treningen {formatFoundAt(status.last_training.started_at)} feilet: {status.last_training.error}.
+                    Kartet viser fortsatt den forrige modellen.
+                    {#if status.last_training.log_tail?.length}
+                      <pre class="mt-1 max-h-32 overflow-auto text-[10px] whitespace-pre-wrap">{status.last_training.log_tail.join('\n')}</pre>
+                    {/if}
+                  </div>
+                {/if}
+                {#if status?.model && status.findings_not_in_model !== undefined}
+                  {#if status.findings_not_in_model}
+                    <div class="rounded-md bg-accent px-3 py-2 text-xs">
+                      {status.findings_not_in_model} funn er ikke med i modellen ennå. Tren på nytt for å bruke dem.
+                    </div>
+                  {:else}
+                    <div class="flex items-start gap-2 text-xs text-muted-foreground">
+                      <CircleCheck class="size-4 shrink-0 text-primary" />
+                      <span>
+                        Kartet er trent med alle funnene ({formatFoundAt(status.model.trained_at)}).
+                      </span>
+                    </div>
+                  {/if}
+                {/if}
                 <Button variant="outline" disabled={!myFindings.length} onclick={retrain}>
                   <Sparkles /> Tren modellen med mine funn
                 </Button>
@@ -1320,6 +1374,13 @@
           {/if}
           {#if downloadMessage}
             <div class="rounded-md bg-accent px-3 py-2 text-xs">{downloadMessage}</div>
+          {/if}
+          {#if staleDownloads && !download}
+            <div class="rounded-md bg-accent px-3 py-2 text-xs">
+              {staleDownloads === 1 ? 'Ett nedlastet område' : `${staleDownloads} nedlastede områder`} er fra en
+              eldre modell. Uten nett vises de gamle fargene og poengsummene der. Gå dit og last ned på nytt for å
+              få den nye modellen.
+            </div>
           {/if}
           {#if !isStandalone()}
             <p class="text-xs text-muted-foreground">
@@ -1364,6 +1425,13 @@
               {status.model.n_findings_used ?? status.model.n_findings}{#if status.model.n_own_findings_used}
                 ({status.model.n_own_findings_used} egne){/if}
             </span>
+            {#if status.my_findings_used !== undefined}
+              <span>Dine funn brukt</span>
+              <span class="text-right text-foreground">
+                {status.my_findings_used}{#if status.my_findings_skipped}
+                  ({status.my_findings_skipped} utelatt: upresise eller utenfor habitat){/if}
+              </span>
+            {/if}
             {#if status.model.habitat}
               <span>Habitat</span>
               <span class="text-right text-foreground">{status.model.habitat}</span>

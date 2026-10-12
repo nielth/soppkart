@@ -10,6 +10,13 @@ export interface Status {
   message: string
   training: boolean
   my_findings: number
+  /** The latest training run; only for users with the training permission. */
+  last_training?: TrainingRun | null
+  /** Trusted users' findings the current model hasn't seen (training permission only). */
+  findings_not_in_model?: number
+  /** This user's findings the model used, and those it left out (imprecise or outside the habitat). */
+  my_findings_used?: number
+  my_findings_skipped?: number
   model: {
     name: string
     latin: string
@@ -26,6 +33,14 @@ export interface Status {
     groups: { key: string; label: string; importance: number }[]
     feature_importance: Record<string, number>
   } | null
+}
+
+export interface TrainingRun {
+  state: 'running' | 'ok' | 'failed'
+  started_at: string
+  finished_at?: string
+  error?: string
+  log_tail?: string[]
 }
 
 export interface FeatureValue {

@@ -115,8 +115,16 @@ whatever the resolution.
   accurate to 50 m are used for training), or tap a spot and choose "Jeg fant … her". Your finds
   are green dots; tap one to delete it. Each user sees only their own finds; admins can switch
   between "Mine" and "Alle brukere". "Tren modellen med mine funn" retrains that species in the
-  background (a few minutes) with the finds of every user with Trening access, each counting
+  background (20–30 minutes) with the finds of every user with Trening access, each counting
   `SOPPKART_OWN_FINDING_WEIGHT` (default 3) times as much as a GBIF finding. They are stored in `data/user/findings.sqlite`.
+  Under the button it says whether the map is trained with every find or how many are not in it yet,
+  and if the last training failed (with the end of its log). When a training finishes while the app
+  is open, it says so and switches to the new map. "Dine funn brukt" under Modellen counts your finds
+  the model used; finds less precise than 50 m or outside the species' habitat are left out. Each
+  run is recorded in `data/model/<species>/training.json`, its log in `data/user/train_<species>.log`.
+- **Downloaded areas after retraining** are not updated by themselves. Without reception they
+  keep showing the colours and scores of the model they were downloaded with, and the "Uten nett"
+  section says how many are from an older model; download them again to get the new one.
 
 ## How it works
 

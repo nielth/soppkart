@@ -36,11 +36,67 @@ CACHE_HEADERS = {"Cache-Control": "public, max-age=3600"}
 
 # Retraining runs as a separate process per species (see /retrain).
 TRAINING: dict[str, subprocess.Popen[bytes]] = {}
+SERVER_STARTED = datetime.now(UTC)
 
 
 def is_training(species: str) -> bool:
     proc = TRAINING.get(species)
     return proc is not None and proc.poll() is None
+
+
+def train_log_path(species: str) -> Path:
+    return config.DATA_DIR / "user" / f"train_{species}.log"
+
+
+def last_training(species: str, files: ModelFiles) -> dict[str, Any] | None:
+    """The latest training run from training.json, or None if none is recorded.
+
+    A run still marked "running" that this server didn't start, and that began
+    before the server did, was cut off by a restart. A process killed outright
+    (e.g. out of memory) can't record its failure itself, so its exit code is
+    checked here.
+    """
+    try:
+        run = dict(json.loads(files.training.read_text()))
+    except (OSError, ValueError):
+        return None
+    proc = TRAINING.get(species)
+    if run.get("state") == "running":
+        if proc is not None and proc.poll() is not None:
+            run |= {"state": "failed", "error": f"Treningen stoppet (kode {proc.returncode})"}
+        elif proc is None and datetime.fromisoformat(run["started_at"]) < SERVER_STARTED:
+            run |= {"state": "failed", "error": "Treningen ble avbrutt av en omstart"}
+    if run.get("state") == "failed":
+        try:
+            lines = train_log_path(species).read_text(errors="replace").splitlines()
+            run["log_tail"] = lines[-8:]
+        except OSError:
+            pass
+    return run
+
+
+def model_saw(finding: dict[str, Any], model_meta: dict[str, Any], key: str) -> bool:
+    """Whether the model's id list `key` (own_finding_ids_used/_skipped) has the finding.
+
+    SQLite can give a deleted finding's id to a new one, so a finding found after
+    the training is never counted as seen.
+    """
+    trained_at = datetime.fromisoformat(model_meta["trained_at"])
+    return (
+        finding["id"] in model_meta.get(key, [])
+        and datetime.fromisoformat(finding["found_at"]) <= trained_at
+    )
+
+
+def in_model(finding: dict[str, Any], model_meta: dict[str, Any]) -> bool:
+    """Whether the model was trained with this finding available (used or not)."""
+    if "own_finding_ids_used" not in model_meta:
+        # Models trained before the ids were recorded: go by the time.
+        trained_at = datetime.fromisoformat(model_meta["trained_at"])
+        return datetime.fromisoformat(finding["found_at"]) <= trained_at
+    return model_saw(finding, model_meta, "own_finding_ids_used") or model_saw(
+        finding, model_meta, "own_finding_ids_skipped"
+    )
 
 
 def current_user(request: Request) -> User | None:
@@ -598,8 +654,10 @@ def species_list(user: MaybeUser) -> list[dict[str, Any]]:
 @app.get("/api/{species}/status")
 def status(species: str, user: MaybeUser) -> dict[str, Any]:
     files = get_files(species, user)
-    my_findings = len(userfindings.list_for(species, user.id)) if user else 0
-    extra = {"training": is_training(species), "my_findings": my_findings}
+    mine = userfindings.list_for(species, user.id) if user else []
+    extra: dict[str, Any] = {"training": is_training(species), "my_findings": len(mine)}
+    if auth.can(user, "training"):
+        extra["last_training"] = last_training(species, files)
     if not is_ready(files):
         return {
             "ready": False,
@@ -607,7 +665,25 @@ def status(species: str, user: MaybeUser) -> dict[str, Any]:
             "model": None,
             **extra,
         }
-    return {"ready": True, "message": "ok", "model": meta(files), **extra}
+    model = meta(files)
+    if auth.can(user, "training"):
+        trusted = auth.trusted_user_ids()
+        everyones = [f for f in userfindings.list_for(species) if f["user_id"] in trusted]
+        extra |= {
+            # Every trusted user's findings count, not just this user's.
+            "findings_not_in_model": sum(not in_model(f, model) for f in everyones),
+        }
+        # Older models didn't record which findings they used.
+        if "own_finding_ids_used" in model:
+            extra |= {
+                "my_findings_used": sum(model_saw(f, model, "own_finding_ids_used") for f in mine),
+                "my_findings_skipped": sum(
+                    model_saw(f, model, "own_finding_ids_skipped") for f in mine
+                ),
+            }
+    # The id lists are only for the counts above.
+    model = {k: v for k, v in model.items() if not k.startswith("own_finding_ids")}
+    return {"ready": True, "message": "ok", "model": model, **extra}
 
 
 @lru_cache(maxsize=4096)
@@ -878,7 +954,7 @@ def retrain(species: str, user: LoggedIn) -> dict[str, bool]:
     require_permission(user, "training")
     if is_training(species):
         raise HTTPException(409, "Modellen trenes allerede")
-    log_path = config.DATA_DIR / "user" / f"train_{species}.log"
+    log_path = train_log_path(species)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("wb") as log_file:
         TRAINING[species] = subprocess.Popen(

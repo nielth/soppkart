@@ -222,8 +222,23 @@ export async function downloadAreaData(kind: OfflineArea['kind'], species: strin
     throw new Error(detail)
   }
   await (await caches.open(AREAS_CACHE)).put(url, response)
-  // The newest download of the same kind replaces older ones for the same area.
-  const areas = loadAreaIndex().filter((a) => a.url !== url)
+  // The newest download of the same kind replaces older ones inside the same area.
+  const inside = (a: OfflineArea) =>
+    a.kind === kind &&
+    a.species === species &&
+    a.bounds[0] >= bounds[0] &&
+    a.bounds[1] >= bounds[1] &&
+    a.bounds[2] <= bounds[2] &&
+    a.bounds[3] <= bounds[3]
+  const cache = await caches.open(AREAS_CACHE)
+  const areas = loadAreaIndex().filter((a) => {
+    const replaced = a.url !== url && inside(a)
+    if (replaced) {
+      cache.delete(a.url)
+      parsed.delete(a.url)
+    }
+    return a.url !== url && !replaced
+  })
   saveAreaIndex([...areas, { kind, species, bounds, url }])
   parsed.delete(url)
 }
@@ -362,6 +377,20 @@ export async function offlinePoint(
     score = 0 // land, but outside the species' habitat
   }
   return { lat, lon, inside: true, score, groups, features, offline: true }
+}
+
+/**
+ * When the models behind the species' downloaded areas were trained (trained_at), one
+ * entry per area, so the map can say when a download is older than the current model.
+ */
+export async function downloadedModelVersions(species: string): Promise<string[]> {
+  const versions: string[] = []
+  for (const area of loadAreaIndex()) {
+    if (area.kind !== 'points' || area.species !== species) continue
+    const data = await loadArea(area, parsePointArea).catch(() => null)
+    if (data) versions.push(data.trained_at)
+  }
+  return versions
 }
 
 interface TrailFeature {

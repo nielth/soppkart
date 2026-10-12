@@ -3,11 +3,14 @@
 // - The app itself (index.html and the built files) is served from the cache when offline.
 // - Map tiles come from the cache when they are there: either downloaded with
 //   "Last ned område" (see src/lib/offline.ts), or saved as you look at the map.
+//   Score tiles carry the model version; without reception, a tile saved for an
+//   older version of the model is used when there is none for the current one.
 // - Species, status and findings lists are fetched fresh when online, and the last
 //   copy is used when offline.
 // Cache names and cacheKey() must match src/lib/offline.ts.
 
 const APP_CACHE = 'soppkart-app'
+const AREAS_CACHE = 'soppkart-areas'
 const DATA_CACHE = 'soppkart-data'
 const SEEN_CACHE = 'soppkart-seen'
 // Tiles saved while looking at the map; the oldest are dropped beyond this.
@@ -59,7 +62,14 @@ async function tile(request) {
   const key = cacheKey(request.url)
   const hit = await caches.match(key, { ignoreVary: true })
   if (hit) return hit
-  const response = await fetch(request)
+  let response
+  try {
+    response = await fetch(request)
+  } catch (err) {
+    const older = await olderScoreTile(request.url)
+    if (older) return older
+    throw err
+  }
   // "Last ned område" fetches with cache: 'no-store' and saves the tile itself.
   if (response.ok && request.cache !== 'no-store') {
     const cache = await caches.open(SEEN_CACHE)
@@ -67,6 +77,33 @@ async function tile(request) {
     trim(cache)
   }
   return response
+}
+
+const SCORE_TILE = /\/api\/[^/]+\/tiles\//
+
+/**
+ * The same score tile (same threshold and weighting) saved for the newest older model
+ * version ("v"), e.g. an area downloaded before the model was retrained. Null if none.
+ */
+async function olderScoreTile(url) {
+  if (!SCORE_TILE.test(url)) return null
+  const wanted = new URL(url)
+  wanted.searchParams.delete('v')
+  const same = (key) => {
+    const u = new URL(key.url)
+    u.searchParams.delete('v')
+    return u.toString() === wanted.toString()
+  }
+  let best = null
+  for (const name of [AREAS_CACHE, SEEN_CACHE]) {
+    const cache = await caches.open(name)
+    // ignoreSearch: every saved version of this tile, whatever the parameters.
+    for (const key of await cache.keys(url, { ignoreSearch: true, ignoreVary: true })) {
+      const v = new URL(key.url).searchParams.get('v') ?? ''
+      if (same(key) && (!best || v > best.v)) best = { v, cache, key }
+    }
+  }
+  return best ? best.cache.match(best.key, { ignoreVary: true }) : null
 }
 
 async function networkFirst(request, cacheName, key) {

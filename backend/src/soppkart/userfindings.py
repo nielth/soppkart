@@ -109,16 +109,21 @@ def claim_unowned(user_id: int) -> int:
 
 
 def as_frame(species: str, user_ids: set[int]) -> pl.DataFrame:
-    """These users' findings of the species, with the same columns as the GBIF findings."""
+    """These users' findings of the species, with the same columns as the GBIF findings.
+
+    Also has the finding's "id", so training can record which findings it used.
+    """
     rows = [r for r in list_for(species) if r["user_id"] in user_ids]
     return pl.DataFrame(
         {
+            "id": [r["id"] for r in rows],
             "lat": [r["lat"] for r in rows],
             "lon": [r["lon"] for r in rows],
             "year": [int(r["found_at"][:4]) for r in rows],
             "uncertainty_m": [r["accuracy_m"] for r in rows],
         },
         schema={
+            "id": pl.Int64,
             "lat": pl.Float64,
             "lon": pl.Float64,
             "year": pl.Int64,
