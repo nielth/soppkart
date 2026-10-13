@@ -133,8 +133,22 @@ def peak_day(season: dict[str, Any], lat: float, elevation_m: float) -> float:
     return float(c0 + c1 * (lat - 60) + c2 * elevation_m / 100)
 
 
-def season_factor(season: dict[str, Any], offset_days: float) -> float:
-    """How much of the season's peak there is at offset_days from the fitted peak (0..1)."""
+def density_at(season: dict[str, Any], offset_days: float) -> float:
+    """Findings at offset_days from the fitted day, relative to the busiest day (0..1)."""
     span = season["span_days"]
     i = round(offset_days) + span
     return float(season["density"][i]) if 0 <= i < len(season["density"]) else 0.0
+
+
+def season_factor(season: dict[str, Any], offset_days: float) -> float:
+    """How far into the season offset_days is: 1 in the middle half, falling off outside it.
+
+    The findings peak sharply on the busiest weekends, but the mushroom is out
+    the whole middle half of the season (q25..q75), so that counts in full;
+    outside it the factor follows the findings, scaled to meet 1 at the edge.
+    """
+    q = season["quantiles"]
+    if q["q25"] <= offset_days <= q["q75"]:
+        return 1.0
+    edge = density_at(season, q["q25"] if offset_days < q["q25"] else q["q75"])
+    return min(1.0, density_at(season, offset_days) / max(edge, 1e-6))
