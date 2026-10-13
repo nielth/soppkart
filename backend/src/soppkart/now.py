@@ -203,17 +203,17 @@ def season_part(
     data = season.load_season(species)
     if data is None:
         return 0.6, factor("info", "Ingen sesongdata ennå")
-    offset = today.timetuple().tm_yday - season.peak_day(data, lat, elevation_m or 0)
-    q = data["quantiles"]
-    value = season.season_factor(data, offset)
-    if offset < q["q05"]:
-        days = round(q["q05"] - offset)
-        return value, factor("bad", f"Før registrert sesong (starter om ca. {days} dager her)")
-    if offset < q["q25"]:
+    days = season.season_days(data, lat, elevation_m or 0)
+    doy = today.timetuple().tm_yday
+    value = season.season_factor(days, doy)
+    if doy < days["q05"]:
+        wait = round(days["q05"] - doy)
+        return value, factor("bad", f"Før registrert sesong (starter om ca. {wait} dager her)")
+    if doy < days["q25"]:
         return value, factor("ok", "Tidlig i registrert soppsesong")
-    if offset <= q["q75"]:
+    if doy <= days["q75"]:
         return value, factor("good", "Midt i registrert soppsesong")
-    if offset <= q["q95"]:
+    if doy <= days["q95"]:
         return value, factor("ok", "Sent i registrert soppsesong")
     return value, factor("bad", "Etter registrert sesong her")
 

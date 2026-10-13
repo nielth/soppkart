@@ -126,7 +126,8 @@ whatever the resolution.
 - **Soppmuligheter nå:** how likely the chosen species is to be out today, in the sidebar for the
   middle of the map and in the panel for a tapped spot. A score from 0 to 100 combines where in
   the season the place is with the weather: the season is learned from the dates of the
-  species' GBIF findings, later further north and higher up (`season.py`), and the weather is the
+  species' GBIF findings: its start, middle and end are each fitted against latitude and
+  elevation, so it can be both later and shorter in the north and up high (`season.py`), and the weather is the
   coming night's lowest temperature (MET Locationforecast) and the rain of the last 14 days at the
   nearest weather station (MET Frost, needs `FROST_CLIENT_ID`). Each species has its own night
   temperatures and rain amounts in `config.Conditions`. Also shows the weather now and the next
