@@ -24,12 +24,16 @@ OSLO = ZoneInfo("Europe/Oslo")
 FORECAST_URL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
 FROST_URL = "https://frost.met.no"
 RAIN_ELEMENT = "sum(precipitation_amount P1D)"
+MIN_TEMP_ELEMENT = "min(air_temperature P1D)"
 FORECAST_TTL_S = 30 * 60
 STATION_TTL_S = 60 * 60
 # A day with at least this much rain counts as a proper rain.
 RAIN_DAY_MM = 5
 # Days after a proper rain that mushrooms keep coming up.
 RAIN_EFFECT_DAYS = 10
+# Species that fruit until the first frost: after this day of the year (mid-December)
+# the season is over even without frost.
+LAST_FROST_FREE_DOY = 350
 # Stations further away say little about the rain here.
 MAX_STATION_KM = 30
 
@@ -91,6 +95,72 @@ async def forecast(lat: float, lon: float) -> dict[str, Any]:
     return result
 
 
+async def station_days(
+    lat: float, lon: float, element: str, start: date, combine: str
+) -> tuple[dict[str, Any], dict[date, float]] | None:
+    """Daily values of a Frost element since start at the nearest station that has them.
+
+    combine: how to merge several series for a day: "PT6H" prefers the 06-06 day
+    (rain sums), "min" takes the lowest (temperatures). Returns (station, values
+    per day), or None when no station within MAX_STATION_KM has enough data.
+    """
+    assert config.FROST_CLIENT_ID is not None
+    auth = (config.FROST_CLIENT_ID, "")
+    res = await client().get(
+        f"{FROST_URL}/sources/v0.jsonld",
+        params={
+            "types": "SensorSystem",
+            "elements": element,
+            "geometry": f"nearest(POINT({lon:.4f} {lat:.4f}))",
+            "nearestmaxcount": 5,
+        },
+        auth=auth,
+    )
+    if res.status_code == 404:
+        return None
+    res.raise_for_status()
+    stations = [s for s in res.json()["data"] if s.get("distance", 0) <= MAX_STATION_KM]
+    if not stations:
+        return None
+    today = datetime.now(OSLO).date()
+    res = await client().get(
+        f"{FROST_URL}/observations/v0.jsonld",
+        params={
+            "sources": ",".join(s["id"] for s in stations),
+            "elements": element,
+            "referencetime": f"{start.isoformat()}/{(today + timedelta(days=1)).isoformat()}",
+        },
+        auth=auth,
+    )
+    # 404/412: none of the stations has observations in the period.
+    if res.status_code in (404, 412):
+        return None
+    res.raise_for_status()
+    daily: dict[str, dict[date, float]] = {}
+    for item in res.json()["data"]:
+        days = daily.setdefault(item["sourceId"].split(":")[0], {})
+        day = datetime.fromisoformat(item["referenceTime"]).date()
+        for obs in item["observations"]:
+            value = float(obs["value"])
+            if day not in days:
+                days[day] = value
+            elif combine == "min":
+                days[day] = min(days[day], value)
+            elif obs.get("timeOffset") == combine:
+                days[day] = value
+    needed = 0.7 * (today - start).days
+    for s in stations:  # nearest first
+        days = daily.get(s["id"], {})
+        if len(days) >= needed:  # not too many gaps
+            station = {
+                "station": s.get("shortName") or s.get("name"),
+                "distance_km": round(float(s["distance"]), 1),
+                "station_masl": s.get("masl"),
+            }
+            return station, days
+    return None
+
+
 async def station_rain(lat: float, lon: float) -> dict[str, Any] | None:
     """Measured daily rain over the last 14 days at the nearest station that has it.
 
@@ -101,66 +171,44 @@ async def station_rain(lat: float, lon: float) -> dict[str, Any] | None:
     key = f"rain:{lat:.2f}:{lon:.2f}"
     if (hit := cached(key)) is not None:
         return hit or None
-    auth = (config.FROST_CLIENT_ID, "")
-    res = await client().get(
-        f"{FROST_URL}/sources/v0.jsonld",
-        params={
-            "types": "SensorSystem",
-            "elements": RAIN_ELEMENT,
-            "geometry": f"nearest(POINT({lon:.4f} {lat:.4f}))",
-            "nearestmaxcount": 5,
-        },
-        auth=auth,
-    )
-    if res.status_code == 404:
-        remember(key, {}, STATION_TTL_S)
-        return None
-    res.raise_for_status()
-    stations = [s for s in res.json()["data"] if s.get("distance", 0) <= MAX_STATION_KM]
-    if not stations:
-        remember(key, {}, STATION_TTL_S)
-        return None
     today = datetime.now(OSLO).date()
-    start = today - timedelta(days=14)
-    res = await client().get(
-        f"{FROST_URL}/observations/v0.jsonld",
-        params={
-            "sources": ",".join(s["id"] for s in stations),
-            "elements": RAIN_ELEMENT,
-            "referencetime": f"{start.isoformat()}/{(today + timedelta(days=1)).isoformat()}",
-        },
-        auth=auth,
-    )
-    # 404/412: none of the stations has observations in the period.
-    if res.status_code in (404, 412):
-        remember(key, {}, STATION_TTL_S)
-        return None
-    res.raise_for_status()
-    # Daily rain per station and day; the 06-06 day sum (PT6H) when there are several.
-    daily: dict[str, dict[date, float]] = {}
-    for item in res.json()["data"]:
-        station_id = item["sourceId"].split(":")[0]
-        day = datetime.fromisoformat(item["referenceTime"]).date()
-        for obs in item["observations"]:
-            days = daily.setdefault(station_id, {})
-            if day not in days or obs.get("timeOffset") == "PT6H":
-                days[day] = float(obs["value"])
+    found = await station_days(lat, lon, RAIN_ELEMENT, today - timedelta(days=14), "PT6H")
     result = None
-    for s in stations:  # nearest first
-        days = daily.get(s["id"], {})
-        if len(days) < 10:
-            continue  # too many gaps
+    if found is not None:
+        station, days = found
         rain_days = [d for d, mm in days.items() if mm >= RAIN_DAY_MM]
-        result = {
-            "station": s.get("shortName") or s.get("name"),
-            "distance_km": round(float(s["distance"]), 1),
-            "station_masl": s.get("masl"),
+        result = station | {
             "rain_14d_mm": round(sum(days.values()), 1),
             "rain_7d_mm": round(sum(mm for d, mm in days.items() if d > today - timedelta(7)), 1),
             "days_since_rain_day": (today - max(rain_days)).days if rain_days else None,
             "last_day": max(days).isoformat(),
         }
-        break
+    remember(key, result or {}, STATION_TTL_S)
+    return result
+
+
+async def station_frost(
+    lat: float, lon: float, since: date, frost_c: float
+) -> dict[str, Any] | None:
+    """The first night at or below frost_c since a date at the nearest station, if any.
+
+    None when Frost isn't set up or no station has the daily minimum temperature.
+    """
+    if config.FROST_CLIENT_ID is None:
+        return None
+    key = f"frost:{lat:.2f}:{lon:.2f}:{since}:{frost_c}"
+    if (hit := cached(key)) is not None:
+        return hit or None
+    found = await station_days(lat, lon, MIN_TEMP_ELEMENT, since, "min")
+    result = None
+    if found is not None:
+        station, days = found
+        frosts = sorted(d for d, t in days.items() if t <= frost_c)
+        result = station | {
+            "first_frost": frosts[0].isoformat() if frosts else None,
+            "first_frost_c": days[frosts[0]] if frosts else None,
+            "coldest_c": min(days.values()),
+        }
     remember(key, result or {}, STATION_TTL_S)
     return result
 
@@ -198,8 +246,15 @@ def factor(status: str, text: str) -> dict[str, str]:
 
 
 def season_part(
-    species: config.Species, lat: float, elevation_m: float | None, today: date
+    species: config.Species,
+    lat: float,
+    elevation_m: float | None,
+    today: date,
+    frost: dict[str, Any] | None,
 ) -> tuple[float, dict[str, str]]:
+    """Where in the season today is. For species whose season ends with the first
+    frost (Conditions.frost_ends_season), the late season lasts as long as the
+    nearest station (frost, see station_frost) hasn't had a frost night yet."""
     data = season.load_season(species)
     if data is None:
         return 0.6, factor("info", "Ingen sesongdata ennå")
@@ -213,6 +268,21 @@ def season_part(
         return value, factor("ok", "Tidlig i registrert soppsesong")
     if doy <= days["q75"]:
         return value, factor("good", "Midt i registrert soppsesong")
+    c = species.conditions
+    if c.frost_ends_season and frost is not None and doy <= LAST_FROST_FREE_DOY:
+        where = f"målestasjon {frost['distance_km']:.1f} km unna"
+        if frost["first_frost"] is None:
+            return 1.0, factor(
+                "good",
+                f"Sent i sesongen, men ingen frost ennå (kaldeste natt {frost['coldest_c']:.1f}°C, "
+                f"{where}): kommer gjerne til første frost",
+            )
+        first = date.fromisoformat(frost["first_frost"]).strftime("%d.%m")
+        return min(value, 0.2), factor(
+            "bad",
+            f"Første frost var {first} ({frost['first_frost_c']:.1f}°C, {where}): "
+            "sesongen er trolig over",
+        )
     if doy <= days["q95"]:
         return value, factor("ok", "Sent i registrert soppsesong")
     return value, factor("bad", "Etter registrert sesong her")
@@ -305,7 +375,15 @@ async def assess(species: config.Species, lat: float, lon: float) -> dict[str, A
     today = datetime.now(OSLO).date()
     c = species.conditions
 
-    season_value, season_line = season_part(species, lat, fc["altitude_m"], today)
+    frost = None
+    if c.frost_ends_season:
+        try:
+            # Frost from the start of the season counts; a summer frost night up high doesn't.
+            since = date(today.year, 8, 1)
+            frost = await station_frost(lat, lon, since, c.frost_c)
+        except httpx.HTTPError as err:
+            log.warning("Frost: %s", err)
+    season_value, season_line = season_part(species, lat, fc["altitude_m"], today, frost)
     weather = [night_part(c, hours)]
     coming = sum(h["precip_mm"] or 0 for h in hours[:24])
     if coming >= 10:

@@ -62,6 +62,11 @@ class Conditions:
     # Rain over the last 14 days (mm): below min too dry, from good on plenty.
     rain_14d_min_mm: float = 15
     rain_14d_good_mm: float = 40
+    # The season ends with the first frost rather than on a date: after the middle
+    # of the season, it lasts as long as the nearest station hasn't had a night at
+    # or below frost_c (°C) since August.
+    frost_ends_season: bool = False
+    frost_c: float = -1
 
 
 @dataclass(frozen=True)
@@ -114,14 +119,14 @@ SPECIES = {
             min_forest_pct=25,
             conditions=Conditions((6, 13), (3, 16), 20, 45),
         ),
-        # Late autumn, often until the first hard frost; tolerates cold nights.
+        # Late autumn, until the first hard frost; tolerates cold nights and light frost.
         Species(
             "traktkantarell",
             "Traktkantarell",
             "Craterellus tubaeformis",
             [2554536],
             min_forest_pct=25,
-            conditions=Conditions((1, 10), (-2, 13), 20, 40),
+            conditions=Conditions((1, 10), (-2, 13), 20, 40, frost_ends_season=True, frost_c=-3),
         ),
         # Grows in grazed grassland: not in forest, and not on fields worked by
         # tractors (crops, grass mowed for hay/silage).
@@ -133,8 +138,9 @@ SPECIES = {
             max_forest_pct=50,
             max_cultivated_pct=50,
             restricted=True,
-            # Autumn in wet, cool weather.
-            conditions=Conditions((3, 10), (0, 13), 25, 50),
+            # Autumn in wet, cool weather, until the first frost: on the coast often
+            # into November.
+            conditions=Conditions((3, 10), (0, 13), 25, 50, frost_ends_season=True),
         ),
         # The genus (spiselig morkel, toppmorkel), not the poisonous stenmorkel
         # (Gyromitra). Grows in gardens, burnt ground, riverbanks and forest

@@ -130,7 +130,10 @@ whatever the resolution.
   elevation, so it can be both later and shorter in the north and up high (`season.py`), and the weather is the
   coming night's lowest temperature (MET Locationforecast) and the rain of the last 14 days at the
   nearest weather station (MET Frost, needs `FROST_CLIENT_ID`). Each species has its own night
-  temperatures and rain amounts in `config.Conditions`. Also shows the weather now and the next
+  temperatures and rain amounts in `config.Conditions`. For spiss fleinsopp and traktkantarell
+  the season ends with the first frost instead of on a date: after the middle of the season it
+  lasts as long as the nearest station (Frost) hasn't had a frost night since 1 August (−1 °C,
+  traktkantarell −3 °C), which on the coast is often well into November. Also shows the weather now and the next
   6 hours. It says nothing about the habitat; that's the map. The season is learned when a
   species is trained; `docker compose exec backend soppkart season` learns it for every species
   without retraining (it fetches the GBIF findings again, with their dates; about 20 minutes for all species).
