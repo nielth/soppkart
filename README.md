@@ -1,7 +1,7 @@
 # Soppkart 🍄
 
 A map of Norway that shows your position and colours the terrain by how
-promising it is for a chosen mushroom species: **kantarell**, **steinsopp**, **svart trompetsopp**,
+promising it is for a chosen mushroom species: **kantarell**, **steinsopp**, **svart trompetsopp**, **traktkantarell**,
 **spiss fleinsopp** or **morkel**. Choose the species in the map panel. The frontend is Svelte with MapLibre, and
 the backend is Python with FastAPI and XGBoost. Both run in Docker Compose behind
 your own reverse proxy.
@@ -36,6 +36,7 @@ Settings go in `.env` (or the stack's Environment in Komodo):
 | `CDSE_S3_ACCESS_KEY`, `CDSE_S3_SECRET_KEY` | Copernicus keys, only needed when rebuilding data from scratch |
 | `ESRI_API_KEY`, `ESRI_REFERER` | Optional: aerial photo background (see Using the map) |
 | `STRAVA_SESSION` | Optional: your `_strava4_session` cookie for the Strava heatmap layer |
+| `FROST_CLIENT_ID` | Optional: MET Norway Frost client ID (free at <https://frost.met.no/auth/requestCredentials.html>), for measured rain in "Soppmuligheter nå" |
 | `SOPPKART_COOKIE_SECURE` | `true` when the site is served over HTTPS: the login cookie is then never sent over plain HTTP |
 
 **Logins:** visitors ("Gjest" at the bottom of the menu) see the map for the open species.
@@ -122,6 +123,16 @@ whatever the resolution.
   is open, it says so and switches to the new map. "Dine funn brukt" under Modellen counts your finds
   the model used; finds less precise than 50 m or outside the species' habitat are left out. Each
   run is recorded in `data/model/<species>/training.json`, its log in `data/user/train_<species>.log`.
+- **Soppmuligheter nå:** how likely the chosen species is to be out today, in the sidebar for the
+  middle of the map and in the panel for a tapped spot. A score from 0 to 100 combines where in
+  the season the place is with the weather: the season is learned from the dates of the
+  species' GBIF findings, later further north and higher up (`season.py`), and the weather is the
+  coming night's lowest temperature (MET Locationforecast) and the rain of the last 14 days at the
+  nearest weather station (MET Frost, needs `FROST_CLIENT_ID`). Each species has its own night
+  temperatures and rain amounts in `config.Conditions`. Also shows the weather now and the next
+  6 hours. It says nothing about the habitat; that's the map. The season is learned when a
+  species is trained; `docker compose exec backend soppkart season` learns it for every species
+  without retraining (it fetches the GBIF findings again, with their dates; about 20 minutes for all species).
 - **Downloaded areas after retraining** are not updated by themselves. Without reception they
   keep showing the colours and scores of the model they were downloaded with, and the "Uten nett"
   section says how many are from an older model; download them again to get the new one.

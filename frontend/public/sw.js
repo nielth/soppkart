@@ -27,7 +27,7 @@ const TILE_PATTERNS = [
   /\/api\/imagery\//,
   /\/api\/strava\//,
 ]
-const DATA_PATTERN = /\/api\/(species|config|auth\/me|[^/]+\/status|[^/]+\/findings\.geojson|[^/]+\/my-findings)(\?|$)/
+const DATA_PATTERN = /\/api\/(species|config|auth\/me|[^/]+\/status|[^/]+\/now|[^/]+\/findings\.geojson|[^/]+\/my-findings)(\?|$)/
 
 /** WMS tile addresses carry a computed BBOX; round it so the same tile always has the same key. */
 function cacheKey(url) {

@@ -223,10 +223,14 @@ def findings_path(species: config.Species) -> Path:
     return FINDINGS_DIR / f"{species.key}.parquet"
 
 
-def fetch_findings(species: config.Species) -> Path:
-    """Occurrences of a species in Norway from GBIF (includes Artsdatabanken data)."""
+def fetch_findings(species: config.Species, refresh: bool = False) -> Path:
+    """Occurrences of a species in Norway from GBIF (includes Artsdatabanken data).
+
+    Cached; refresh fetches them again (e.g. for newer findings, or the dates that
+    older downloads lack).
+    """
     path = findings_path(species)
-    if path.exists():
+    if path.exists() and not refresh:
         log.info("cached: %s", path.name)
         return path
     rows: list[dict[str, object]] = []
@@ -257,6 +261,12 @@ def fetch_findings(species: config.Species) -> Path:
                             "lat": r["decimalLatitude"],
                             "lon": r["decimalLongitude"],
                             "year": r.get("year"),
+                            # Only for findings dated to one day, not a range.
+                            **(
+                                {"month": r.get("month"), "day": r.get("day")}
+                                if "/" not in str(r.get("eventDate", ""))
+                                else {"month": None, "day": None}
+                            ),
                             "uncertainty_m": r.get("coordinateUncertaintyInMeters"),
                             "basis": r.get("basisOfRecord"),
                         }

@@ -1,11 +1,11 @@
-"""Command line entry point: `soppkart {fetch,features,train,all,adduser}`."""
+"""Command line entry point: `soppkart {fetch,features,train,all,season,adduser}`."""
 
 import argparse
 import getpass
 import logging
 import sys
 
-from soppkart import auth, config, features, sources, train, userfindings
+from soppkart import auth, config, features, season, sources, train, userfindings
 from soppkart.grid import Grid
 
 
@@ -45,9 +45,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="soppkart", description="Kantarell map pipeline")
     parser.add_argument(
         "step",
-        choices=["fetch", "features", "train", "all", "adduser"],
+        choices=["fetch", "features", "train", "all", "season", "adduser"],
         help="fetch: download source data, features: build feature rasters, "
         "train: train model and write score map, all: everything, "
+        "season: fetch the GBIF findings again and learn each species' season (also done by "
+        "train), "
         "adduser: create a login (asks for the password)",
     )
     parser.add_argument("--username", help="adduser: the new user's username")
@@ -55,7 +57,7 @@ def main() -> None:
     parser.add_argument(
         "--species",
         choices=list(config.SPECIES),
-        help="only train this species (default: all)",
+        help="only train (or learn the season of) this species (default: all)",
     )
     args = parser.parse_args()
 
@@ -74,6 +76,10 @@ def main() -> None:
         sources.fetch_all()
     if args.step in ("features", "all"):
         features.build_features(Grid.norway())
+    if args.step == "season":
+        for key in [args.species] if args.species else list(config.SPECIES):
+            sources.fetch_findings(config.SPECIES[key], refresh=True)
+            season.build_season(config.SPECIES[key])
     if args.step in ("train", "all"):
         keys = [args.species] if args.species else list(config.SPECIES)
         for key in keys:

@@ -24,7 +24,7 @@ from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.io import Reader
 from rio_tiler.utils import render
 
-from soppkart import auth, config, features, stravaheat, userfindings
+from soppkart import auth, config, features, now, stravaheat, userfindings
 from soppkart.auth import User
 from soppkart.colormap import DEFAULT_THRESHOLD, colormap
 from soppkart.train import CONTRIB_NODATA, CONTRIB_SCALE, ModelFiles, model_files
@@ -649,6 +649,21 @@ def species_list(user: MaybeUser) -> list[dict[str, Any]]:
         for s in config.SPECIES.values()
         if not s.restricted or auth.can(user, s.key)
     ]
+
+
+@app.get("/api/{species}/now")
+async def now_conditions(
+    species: str,
+    user: MaybeUser,
+    lat: float = Query(ge=57, le=72),
+    lon: float = Query(ge=4, le=32),
+) -> dict[str, Any]:
+    """ "Soppmuligheter nå": season and weather for the species at a spot, today."""
+    get_files(species, user)
+    try:
+        return await now.assess(config.SPECIES[species], lat, lon)
+    except httpx.HTTPError as err:
+        raise HTTPException(502, f"Fikk ikke værdata fra MET: {err}") from None
 
 
 @app.get("/api/{species}/status")

@@ -21,6 +21,13 @@ ESRI_REFERER = os.environ.get("ESRI_REFERER") or None
 # heatmap layer. Optional; the backend renews the 24 h heatmap access itself.
 STRAVA_SESSION = os.environ.get("STRAVA_SESSION") or None
 
+# MET Norway's Frost API client ID (free, from https://frost.met.no/auth/requestCredentials.html),
+# for measured rain at the nearest weather station. Optional: without it the
+# "Soppmuligheter nå" assessment has the forecast only.
+FROST_CLIENT_ID = os.environ.get("FROST_CLIENT_ID") or None
+# MET Norway's terms ask every app to identify itself in its User-Agent.
+MET_USER_AGENT = os.environ.get("MET_USER_AGENT") or "soppkart/1.0 github.com/nielth/soppkart"
+
 # Redis for caching aerial photo tiles (optional; without it every tile goes to Esri).
 REDIS_URL = os.environ.get("REDIS_URL") or None
 # Used when Esri doesn't say how long a tile may be cached (it normally says 24 h).
@@ -46,6 +53,18 @@ GRID_SIZE_M = (90_016 * 16, 100_299 * 16)
 
 
 @dataclass(frozen=True)
+class Conditions:
+    """The weather a species needs to fruit, for "Soppmuligheter nå" (see now.py)."""
+
+    # Lowest night temperature (°C) that suits fruiting, and a wider range that still works.
+    night_ideal_c: tuple[float, float] = (7, 14)
+    night_ok_c: tuple[float, float] = (4, 17)
+    # Rain over the last 14 days (mm): below min too dry, from good on plenty.
+    rain_14d_min_mm: float = 15
+    rain_14d_good_mm: float = 40
+
+
+@dataclass(frozen=True)
 class Species:
     key: str
     name: str
@@ -61,6 +80,7 @@ class Species:
     max_cultivated_pct: float | None = None
     # Only shown to users an admin has given access to (see auth.PERMISSIONS).
     restricted: bool = False
+    conditions: Conditions = Conditions()
 
 
 SPECIES = {
@@ -74,6 +94,8 @@ SPECIES = {
             "Cantharellus cibarius",
             [5249504, 5249496],
             min_forest_pct=25,
+            # Summer and early autumn; copes with drier spells than most.
+            conditions=Conditions((8, 15), (4, 18), 15, 35),
         ),
         Species(
             "steinsopp",
@@ -81,6 +103,8 @@ SPECIES = {
             "Boletus edulis",
             [5954958],
             min_forest_pct=25,
+            # Fruits after warm rain in late summer.
+            conditions=Conditions((8, 15), (5, 18), 20, 45),
         ),
         Species(
             "svart_trompetsopp",
@@ -88,6 +112,16 @@ SPECIES = {
             "Craterellus cornucopioides",
             [2554662],
             min_forest_pct=25,
+            conditions=Conditions((6, 13), (3, 16), 20, 45),
+        ),
+        # Late autumn, often until the first hard frost; tolerates cold nights.
+        Species(
+            "traktkantarell",
+            "Traktkantarell",
+            "Craterellus tubaeformis",
+            [2554536],
+            min_forest_pct=25,
+            conditions=Conditions((1, 10), (-2, 13), 20, 40),
         ),
         # Grows in grazed grassland: not in forest, and not on fields worked by
         # tractors (crops, grass mowed for hay/silage).
@@ -99,11 +133,20 @@ SPECIES = {
             max_forest_pct=50,
             max_cultivated_pct=50,
             restricted=True,
+            # Autumn in wet, cool weather.
+            conditions=Conditions((3, 10), (0, 13), 25, 50),
         ),
         # The genus (spiselig morkel, toppmorkel), not the poisonous stenmorkel
         # (Gyromitra). Grows in gardens, burnt ground, riverbanks and forest
         # edges, so no habitat rule: the model learns it from the findings.
-        Species("morkel", "Morkel", "Morchella", [2594601]),
+        Species(
+            "morkel",
+            "Morkel",
+            "Morchella",
+            [2594601],
+            # Spring: cool nights, moist soil.
+            conditions=Conditions((2, 9), (-1, 12), 10, 30),
+        ),
     ]
 }
 

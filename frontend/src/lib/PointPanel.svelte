@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { PointInfo, Status, TrailRoute } from './api'
+  import NowCard from './NowCard.svelte'
   import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
   import * as Card from '$lib/components/ui/card'
@@ -11,6 +12,7 @@
     loading: boolean
     error: string | null
     status: Status | null
+    species: string
     /** Hiking/ski/cycle routes near the spot (Kartverket, incl. DNT/UT.no). */
     routes: TrailRoute[]
     /** Only logged-in users can save findings. */
@@ -19,7 +21,7 @@
     onregister: (lat: number, lon: number) => void
   }
 
-  let { point, loading, error, status, routes, canregister, onclose, onregister }: Props = $props()
+  let { point, loading, error, status, species, routes, canregister, onclose, onregister }: Props = $props()
   let registered = $state(false)
 
   // A new spot gets a fresh "register" button.
@@ -110,6 +112,13 @@
           </dl>
         </div>
       {/each}
+
+      {#if point.inside && !point.offline}
+        <div class="rounded-lg border px-3 py-2">
+          <div class="mb-1.5 text-xs font-medium">Soppmuligheter nå</div>
+          <NowCard {species} lat={point.lat} lon={point.lon} place="Her" />
+        </div>
+      {/if}
 
       {#if point.inside}
         {#if point.groups?.length}

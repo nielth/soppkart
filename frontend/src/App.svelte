@@ -59,6 +59,7 @@
     ChevronDown,
     CircleCheck,
     CloudDownload,
+    CloudSun,
     Crosshair,
     Layers,
     LogIn,
@@ -71,6 +72,7 @@
     Users,
     WifiOff,
   } from '@lucide/svelte'
+  import NowCard from './lib/NowCard.svelte'
   import PointPanel from './lib/PointPanel.svelte'
   import {
     cacheAppShell,
@@ -132,6 +134,8 @@
   let topPct = $state(loadTopPct())
   let threshold = $derived(1 - topPct / 100)
   let gps = $state<{ lat: number; lon: number; accuracy: number } | null>(null)
+  // The middle of the map, for "Soppmuligheter nå".
+  let centre = $state<{ lat: number; lon: number } | null>(null)
   let findingMessage = $state<string | null>(null)
   let myFindings = $state<MyFinding[]>([])
   let showMyList = $state(false)
@@ -374,6 +378,12 @@
     })
 
     map.on('click', (e) => onMapClick(e))
+    const updateCentre = () => {
+      const c = map!.getCenter()
+      centre = { lat: c.lat, lon: c.lng }
+    }
+    updateCentre()
+    map.on('moveend', updateCentre)
 
     loadAccess()
 
@@ -1094,6 +1104,15 @@
         </Sidebar.GroupContent>
       </Sidebar.Group>
 
+      {#if centre && species}
+        <Sidebar.Group>
+          <Sidebar.GroupLabel class="gap-2"><CloudSun /> Soppmuligheter nå</Sidebar.GroupLabel>
+          <Sidebar.GroupContent class="px-2">
+            <NowCard {species} lat={centre.lat} lon={centre.lon} place="Midt på kartet" />
+          </Sidebar.GroupContent>
+        </Sidebar.Group>
+      {/if}
+
       <Sidebar.Group>
         <Sidebar.GroupLabel class="gap-2"><Layers /> Kart</Sidebar.GroupLabel>
         <Sidebar.GroupContent class="flex flex-col gap-4 px-2 pt-1">
@@ -1468,6 +1487,7 @@
         loading={pointLoading}
         error={pointError}
         {status}
+        {species}
         {routes}
         onclose={closePanel}
         canregister={user !== null}

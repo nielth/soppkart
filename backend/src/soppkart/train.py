@@ -28,7 +28,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GroupKFold
 from xgboost import DMatrix, XGBClassifier
 
-from soppkart import auth, config, sources, userfindings
+from soppkart import auth, config, season, sources, userfindings
 from soppkart.features import (
     FEATURE_GROUPS,
     FEATURE_KEYS,
@@ -272,6 +272,8 @@ def train(species: config.Species) -> None:
 def _train(species: config.Species, files: ModelFiles) -> None:
     grid = Grid.norway()
     log.info("training %s", species.name)
+    # A new species has no findings downloaded yet.
+    sources.fetch_findings(species)
 
     findings = load_findings(grid, species)
     precise = findings.filter(
@@ -380,6 +382,7 @@ def _train(species: config.Species, files: ModelFiles) -> None:
         "contrib_scale": CONTRIB_SCALE,
     }
     write_findings_geojson(files.findings, findings.filter(pl.col("source") == "gbif"))
+    season.build_season(species)
     # Meta last: its training time tells the map that a new version is ready.
     write_json(files.meta, meta)
     log.info("done: %s", json.dumps(feature_importance))
@@ -430,6 +433,7 @@ def write_findings_geojson(path: Path, findings: pl.DataFrame) -> None:
         5242507: "Psilocybe semilanceata",
         5954958: "Boletus edulis",
         2554662: "Craterellus cornucopioides",
+        2554536: "Craterellus tubaeformis",
         2594601: "Morchella",
     }
     features = [

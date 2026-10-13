@@ -95,6 +95,45 @@ export function fetchStatus(species: string): Promise<Status> {
   return getJson<Status>(`/api/${species}/status`)
 }
 
+export interface NowFactor {
+  /** good/ok/bad count towards the score; info lines don't. */
+  status: 'good' | 'ok' | 'bad' | 'info'
+  text: string
+}
+
+export interface NowHour {
+  time: string
+  temp_c: number | null
+  wind_ms: number | null
+  precip_mm: number | null
+  symbol: string | null
+}
+
+/** "Soppmuligheter nå": season and weather for a species at a spot today. */
+export interface NowInfo {
+  lat: number
+  lon: number
+  updated_at: string
+  score: number
+  label: string
+  current: {
+    temp_c: number | null
+    symbol: string | null
+    wind: string | null
+    humidity_pct: number | null
+    hiking: string
+  }
+  next_hours: NowHour[]
+  factors: NowFactor[]
+  station: { station: string; distance_km: number } | null
+  note: string
+}
+
+/** Coordinates rounded to ~1 km: the backend's weather is per ~1 km, and the URL can be cached offline. */
+export function fetchNow(species: string, lat: number, lon: number): Promise<NowInfo> {
+  return getJson<NowInfo>(`/api/${species}/now?lat=${lat.toFixed(2)}&lon=${lon.toFixed(2)}`)
+}
+
 /** weights: "w" parameter from weightsParam, or '' for the model's own weighting. */
 export function fetchPoint(species: string, lat: number, lon: number, weights: string): Promise<PointInfo> {
   const params = new URLSearchParams({ lat: lat.toFixed(6), lon: lon.toFixed(6) })
